@@ -9,7 +9,6 @@ import type { TTSProvider } from "@/lib/providers/types"
 import { checkRateLimit } from "@/lib/rate-limit"
 import { normalizeTextForTTS } from "@/lib/text/tts-normalize"
 import type { SoundboardManifest, SoundClip } from "@/lib/manifests/types"
-import { getVoicePresetById } from "@/lib/voice-presets/catalog"
 import { getUserEntitlements, canUsePresetForTier } from "@/lib/billing/entitlements"
 import { BASE_MAX_PHRASE_CHARS, BASE_MAX_PHRASES } from "@/lib/billing/config"
 import {
@@ -20,8 +19,14 @@ import {
   creditBananaCredits,
 } from "@/lib/billing/banana-credits"
 import { jsonGenerationErrorResponse } from "@/lib/security/generation-error"
+import {
+  getProductionDependencyIssues,
+  shouldEnforceProductionDeps,
+} from "@/lib/runtime/check-production-deps"
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+const logCtx = (soundboardId: string) => ({ soundboardId })
 
 export async function POST(
   _req: Request,
@@ -37,27 +42,51 @@ export async function POST(
 
   const { id } = await params
   const store = getManifestStore()
+
+  if (shouldEnforceProductionDeps()) {
+    const deps = getProductionDependencyIssues()
+    if (!deps.ok) {
+      return NextResponse.json(
+        {
+          error: "Server storage is not configured for generation. Open /api/health for details.",
+          code: "SERVER_MISCONFIGURED",
+          issues: deps.issues,
+        },
+        { status: 503 }
+      )
+    }
+  }
+
   const raw = await store.get(`soundboard:${id}`)
   if (!raw) return NextResponse.json({ error: "Not found" }, { status: 404 })
 
-  const manifest = JSON.parse(raw) as SoundboardManifest
-  if (manifest.ownerId !== user.id) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-  }
-
-  // Atomic generation lock — prevents concurrent double-debit (TOCTOU race condition).
   const lockKey = `generate_lock:soundboard:${id}`
-  const lockAcquired = typeof store.setNX === "function" ? await store.setNX(lockKey, 360) : true
-  if (!lockAcquired) {
-    if (manifest.status === "processing") return NextResponse.json(manifest)
-    return NextResponse.json({ error: "Generation already in progress. Please wait." }, { status: 409 })
-  }
+  let lockHeld = false
+  let creditsDebited = 0
 
   try {
-  // Idempotency — duplicate POSTs while a run is in flight should not start a second job.
-  if (manifest.status === "processing") {
-    return NextResponse.json(manifest)
-  }
+    let manifest: SoundboardManifest
+    try {
+      manifest = JSON.parse(raw) as SoundboardManifest
+    } catch (err) {
+      return jsonGenerationErrorResponse("soundboard/generate:parse", err, 500, logCtx(id))
+    }
+
+    if (manifest.ownerId !== user.id) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+    }
+
+    const lockAcquired = typeof store.setNX === "function" ? await store.setNX(lockKey, 360) : true
+    if (!lockAcquired) {
+      if (manifest.status === "processing") return NextResponse.json(manifest)
+      return NextResponse.json({ error: "Generation already in progress. Please wait." }, { status: 409 })
+    }
+    lockHeld = true
+
+    // Idempotency — duplicate POSTs while a run is in flight should not start a second job.
+    if (manifest.status === "processing") {
+      return NextResponse.json(manifest)
+    }
 
   const ent = await getUserEntitlements(user.id)
   if (manifest.voicePresetId && !canUsePresetForTier(manifest.voicePresetId, false)) {
@@ -143,6 +172,7 @@ export async function POST(
       { status: 402 }
     )
   }
+  creditsDebited = generationCost
   const balanceAfterDebit = debit.balance
 
   let voiceId: string
@@ -168,7 +198,7 @@ export async function POST(
       progressPct: 100,
       lastError: err instanceof Error ? err.message : String(err),
     })
-    return jsonGenerationErrorResponse("soundboard/generate:voice", err)
+    return jsonGenerationErrorResponse("soundboard/generate:voice", err, 500, logCtx(id))
   }
 
   async function synthesizeWithRetry(
@@ -291,13 +321,18 @@ export async function POST(
       progressPct: 100,
       lastError: err instanceof Error ? err.message : String(err),
     })
-    return jsonGenerationErrorResponse("soundboard/generate:clips", err)
+    return jsonGenerationErrorResponse("soundboard/generate:clips", err, 500, logCtx(id))
   }
 
   const rawLatest = await store.get(`soundboard:${id}`)
-  const latestBase = rawLatest
-    ? (JSON.parse(rawLatest) as SoundboardManifest)
-    : manifest
+  let latestBase: SoundboardManifest = manifest
+  if (rawLatest) {
+    try {
+      latestBase = JSON.parse(rawLatest) as SoundboardManifest
+    } catch {
+      /* keep manifest; avoid post-success throw → outer catch → wrongful refund */
+    }
+  }
 
   const updated: SoundboardManifest = {
     ...latestBase,
@@ -316,7 +351,41 @@ export async function POST(
     bananaCreditsCharged: generationCost,
     bananaCreditsBalance: balanceAfterDebit,
   })
+  } catch (unexpected) {
+    if (creditsDebited > 0) {
+      await creditBananaCredits(user.id, creditsDebited).catch((refundErr) => {
+        console.error("[soundboard/generate] credit refund failed (unexpected):", refundErr)
+      })
+    }
+    const curRaw = await store.get(`soundboard:${id}`)
+    if (curRaw) {
+      try {
+        const cur = JSON.parse(curRaw) as SoundboardManifest
+        if (cur.ownerId === user.id) {
+          await store.set(
+            `soundboard:${id}`,
+            JSON.stringify({
+              ...cur,
+              status: "failed",
+              progressStep: "Failed",
+              progressPct: 100,
+              lastError:
+                unexpected instanceof Error ? unexpected.message : String(unexpected),
+              updatedAt: new Date().toISOString(),
+            })
+          )
+        }
+      } catch {
+        /* ignore corrupt KV during error handling */
+      }
+    }
+    return jsonGenerationErrorResponse(
+      "soundboard/generate:unexpected",
+      unexpected,
+      500,
+      logCtx(id)
+    )
   } finally {
-    await store.del(lockKey).catch(() => {})
+    if (lockHeld) await store.del(lockKey).catch(() => {})
   }
 }

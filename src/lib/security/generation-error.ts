@@ -7,18 +7,29 @@ const UPSTREAM_BUSY_MESSAGE =
   "Our AI providers are temporarily at capacity (rate limit). Please wait a few minutes and try again."
 
 /** Log full error server-side; return a stable reference for support tickets. */
-export function logGenerationFailure(scope: string, err: unknown): string {
+export function logGenerationFailure(
+  scope: string,
+  err: unknown,
+  logContext?: Record<string, string>
+): string {
   const ref = randomUUID()
-  console.error(`[${scope}] ref=${ref}`, err)
+  const suffix =
+    logContext && Object.keys(logContext).length > 0
+      ? ` ${Object.entries(logContext)
+          .map(([k, v]) => `${k}=${v}`)
+          .join(" ")}`
+      : ""
+  console.error(`[${scope}] ref=${ref}${suffix}`, err)
   return ref
 }
 
 export function jsonGenerationErrorResponse(
   scope: string,
   err: unknown,
-  status = 500
+  status = 500,
+  logContext?: Record<string, string>
 ): NextResponse {
-  const ref = logGenerationFailure(scope, err)
+  const ref = logGenerationFailure(scope, err, logContext)
   if (isGenerationConfigError(err)) {
     return NextResponse.json(
       { error: err.message, code: err.code, ref },
