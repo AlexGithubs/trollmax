@@ -206,6 +206,7 @@ export async function POST(
   creditsDebited = generationCost
   const balanceAfterDebit = debit.balance
   genLog(id, "credits_debited", { generationCost, balanceAfterDebit })
+  genLog(id, "before_preparing_voice_update")
 
   let voiceId: string
   let refTextForSynth: string | undefined
@@ -213,6 +214,7 @@ export async function POST(
 
   try {
     await updateProgress({ progressStep: "Preparing voice…", progressPct: 5 })
+    genLog(id, "after_preparing_voice_update")
     genLog(id, "voice_prep_begin")
     const persist = async (next: SoundboardManifest) => {
       await store.set(`soundboard:${id}`, JSON.stringify(next))

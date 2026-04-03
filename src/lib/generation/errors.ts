@@ -8,6 +8,14 @@ export class GenerationConfigError extends Error {
   }
 }
 
+/**
+ * Next.js can duplicate class identity across bundles, breaking `instanceof`.
+ * Treat by name + code so config errors still map to 503 + clear messages.
+ */
 export function isGenerationConfigError(err: unknown): err is GenerationConfigError {
-  return err instanceof GenerationConfigError
+  if (err instanceof GenerationConfigError) return true
+  if (err && typeof err === "object" && "code" in err) {
+    return (err as { code?: unknown }).code === "GENERATION_CONFIG"
+  }
+  return err instanceof Error && err.name === "GenerationConfigError"
 }

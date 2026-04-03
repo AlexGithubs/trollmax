@@ -383,7 +383,11 @@ export default function NewSoundboardPage() {
       const genPromise = fetch(`/api/soundboard/${createdId}/generate`, { method: "POST" })
         .then(async (r) => {
           const j = await r.json().catch(() => ({}))
-          if (!r.ok) throw new Error((j as { error?: string }).error ?? "Generation failed")
+          if (!r.ok) {
+            const o = j as { error?: string; detail?: string }
+            const msg = [o.error, o.detail].filter(Boolean).join(" — ")
+            throw new Error(msg || "Generation failed")
+          }
           return j as { id?: string }
         })
         .catch((e) => {

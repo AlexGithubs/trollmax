@@ -37,8 +37,18 @@ export function jsonGenerationErrorResponse(
 ): NextResponse {
   const ref = logGenerationFailure(scope, err, logContext)
   if (isGenerationConfigError(err)) {
+    const msg =
+      err instanceof Error
+        ? err.message
+        : typeof err === "object" && err !== null && "message" in err
+          ? String((err as { message: unknown }).message)
+          : String(err)
     return NextResponse.json(
-      { error: err.message, code: err.code, ref },
+      {
+        error: msg,
+        code: "GENERATION_CONFIG",
+        ref,
+      },
       { status: 503 }
     )
   }
@@ -57,10 +67,17 @@ export function jsonGenerationErrorResponse(
       { status: 503 }
     )
   }
+  const detail =
+    err instanceof Error
+      ? err.message.slice(0, 500)
+      : typeof err === "string"
+        ? err.slice(0, 500)
+        : undefined
   return NextResponse.json(
     {
       error: "Generation failed. Please try again or contact support.",
       ref,
+      ...(detail ? { detail } : {}),
     },
     { status }
   )
