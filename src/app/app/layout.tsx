@@ -1,6 +1,7 @@
 import Link from "next/link"
 import { AppUserButton } from "@/components/layout/AppUserButton"
 import { OnboardingTour, TourRestartButton } from "@/components/onboarding/OnboardingTour"
+import { SignInBalanceLink, SignInMobileButton, SignInSidebarButton } from "@/components/layout/SignInLink"
 import { currentUser } from "@clerk/nextjs/server"
 import { Zap, Mic2, Video, LayoutDashboard, Coins } from "lucide-react"
 import { getUserEntitlements } from "@/lib/billing/entitlements"
@@ -45,14 +46,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               <p className="mt-1 text-[11px] text-muted-foreground">
                 New accounts start with 5 free banana credits.
               </p>
-              <Link
-                data-tour="credits-link"
-                href="/sign-in"
-                className="mt-2 flex items-center gap-1.5 text-[11px] font-medium text-primary/90 underline-offset-2 hover:text-primary hover:underline"
-              >
-                <Coins className="h-3 w-3 shrink-0 opacity-80" />
-                Sign in to see your balance
-              </Link>
+              <SignInBalanceLink />
             </>
           )}
         </div>
@@ -69,6 +63,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         </nav>
         <div className="shrink-0 space-y-2 border-t border-border/50 bg-card/30 p-4">
           <TourRestartButton />
+          <SignInSidebarButton />
           <AppUserButton />
         </div>
       </aside>
@@ -86,12 +81,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                 <img src={currencyIconSrc()} alt={currencyIconAlt()} className="h-6 w-6 object-contain" />
               </span>
             ) : (
-              <Link
-                href="/sign-in"
-                className="rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs font-semibold text-primary hover:bg-primary/20 transition-colors"
-              >
-                Sign in
-              </Link>
+              <SignInMobileButton />
             )}
             <AppUserButton />
           </div>

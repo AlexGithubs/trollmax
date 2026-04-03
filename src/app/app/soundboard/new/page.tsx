@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useMemo } from "react"
 import { useRouter } from "next/navigation"
-import { useUser } from "@clerk/nextjs"
+import { useUser, useClerk } from "@clerk/nextjs"
 import { Button } from "@/components/ui/button"
 import { TourOfferBanner } from "@/components/onboarding/TourOfferBanner"
 import { Card, CardContent } from "@/components/ui/card"
@@ -64,6 +64,7 @@ async function deleteSampleOnServer(url: string) {
 export default function NewSoundboardPage() {
   const router = useRouter()
   const { isSignedIn } = useUser()
+  const { openSignIn } = useClerk()
 
   const [ent, setEnt] = useState<BillingEntitlement | null>(null)
 
@@ -283,7 +284,7 @@ export default function NewSoundboardPage() {
   async function handleGenerate() {
     setError("")
     if (!isSignedIn) {
-      router.push("/sign-in?redirect_url=" + encodeURIComponent(window.location.href))
+      openSignIn()
       return
     }
     if (atSoundboardLimit) {
@@ -493,7 +494,7 @@ export default function NewSoundboardPage() {
               <p className="text-xs text-muted-foreground">
                 Tap a card to select it and hear a short preview. Tap again to stop.
               </p>
-              <div className="flex gap-2 overflow-x-auto pb-1">
+              <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
                   disabled={busy}
@@ -525,8 +526,8 @@ export default function NewSoundboardPage() {
                   </button>
                 ))}
               </div>
-              <div className="max-h-[min(420px,55vh)] overflow-y-auto pr-1">
-                <div className="flex gap-3 overflow-x-auto pb-1 sm:grid sm:grid-cols-3 sm:overflow-visible">
+              <div className="preset-scroll max-h-[min(420px,55vh)] overflow-y-auto pr-2">
+                <div className="grid grid-cols-3 gap-3">
                   {filteredPresets.map((p) => {
                     const selected = selectedPresetId === p.id
                     const comingSoon = p.status !== "active"
@@ -939,7 +940,7 @@ export default function NewSoundboardPage() {
             size="lg"
           >
             <span className="tracking-tight">
-              {isSignedIn === false ? "Sign in to Generate" : "Generate Soundboard"}
+              Generate Soundboard
             </span>
             <span className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-black/15 px-3 py-1.5 text-sm font-bold backdrop-blur-sm">
               <img src={currencyIconSrc()} alt={currencyIconAlt()} className="h-7 w-7 object-contain" />

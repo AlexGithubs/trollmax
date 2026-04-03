@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
-import { useUser } from "@clerk/nextjs"
+import { useUser, useClerk } from "@clerk/nextjs"
 import Link from "next/link"
 import { TourOfferBanner } from "@/components/onboarding/TourOfferBanner"
 import NextImage from "next/image"
@@ -136,6 +136,7 @@ interface Props {
 export function NewVideoForm({ boards, categories, presets }: Props) {
   const router = useRouter()
   const { isSignedIn } = useUser()
+  const { openSignIn } = useClerk()
 
   const [stage, setStage] = useState<Stage>("form")
   const [error, setError] = useState("")
@@ -392,7 +393,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
   async function handleGenerate() {
     setError("")
     if (!isSignedIn) {
-      router.push("/sign-in?redirect_url=" + encodeURIComponent(window.location.href))
+      openSignIn()
       return
     }
     if (!videoTitle.trim()) return setError("Enter a name for this video.")
@@ -662,7 +663,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
               <p className="text-xs text-muted-foreground">
                 Tap a card to select it and hear a short preview. Tap again to stop.
               </p>
-              <div className="flex gap-2 overflow-x-auto pb-1">
+              <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
                   onClick={() => setCategoryFilter("all")}
@@ -692,8 +693,8 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
                   </button>
                 ))}
               </div>
-              <div data-tour="video-preset-grid" className="max-h-[min(420px,55vh)] overflow-y-auto pr-1">
-                <div className="flex gap-3 overflow-x-auto pb-1 sm:grid sm:grid-cols-3 sm:overflow-visible">
+              <div data-tour="video-preset-grid" className="preset-scroll max-h-[min(420px,55vh)] overflow-y-auto pr-2">
+                <div className="grid grid-cols-3 gap-3">
                   {filteredPresets.map((p) => {
                     const selected = selectedPresetId === p.id
                     const comingSoon = p.status !== "active"
@@ -1077,7 +1078,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
         size="lg"
       >
         <span className="tracking-tight">
-          {isSignedIn === false ? "Sign in to Generate" : "Generate Video"}
+          Generate Video
         </span>
         <span className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-black/15 px-3 py-1.5 text-sm font-bold backdrop-blur-sm">
           <img src={currencyIconSrc()} alt={currencyIconAlt()} className="h-7 w-7 object-contain" />

@@ -1,0 +1,62 @@
+---
+description: Production safety guardrails for Vercel deployment
+alwaysApply: true
+---
+
+# Production Safety — Vercel/Trollmax
+
+This project is deployed to **trollmax.xyz** on Vercel Hobby plan. Flag any of the following before making changes.
+
+## Serverless Function Limits
+
+- `maxDuration` must be **≤ 300** on all routes (Hobby plan hard cap)
+- Current limits: `video/[id]/generate` = 300s, `soundboard/[id]/generate` = 300s
+
+```ts
+// ❌ BAD — will cause deploy failure
+export const maxDuration = 600
+
+// ✅ GOOD
+export const maxDuration = 300
+```
+
+## Environment Variables
+
+- Any new env var must be added to **both** `.env.local` AND `.env.example`
+- Remind the user to add it to Vercel (dashboard or CLI: `vercel env add KEY production`)
+- Never hardcode secrets — always use `process.env.VAR_NAME`
+
+## Hardcoded URLs
+
+```ts
+// ❌ BAD
+fetch('http://localhost:3000/api/foo')
+
+// ✅ GOOD
+fetch('/api/foo')  // relative, or:
+fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/foo`)
+```
+
+## Edge Runtime Restrictions
+
+`middleware.ts` runs on the Edge runtime. Never use:
+- `fs`, `path`, `crypto`, `os` (Node built-ins)
+- Any package that requires Node.js internals
+
+## Mock Mode
+
+- `NEXT_PUBLIC_MOCK_MODE` must **never** be set to `true` on Vercel
+- Mock bypass is already guarded by `NODE_ENV !== "production"` — do not remove that check
+
+## New npm Packages
+
+- Flag packages with native binaries (e.g. `sharp`, `canvas`, `bcrypt`) — they may not compile on Vercel's Linux environment
+- Check with `npm audit` after installing
+
+## Before Deploying
+
+Remind the user to run:
+```bash
+vercel --prod
+```
+and check the build log for errors before considering a change complete.
