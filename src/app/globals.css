@@ -134,6 +134,14 @@ body {
   animation: landing-shimmer 4.2s ease-in-out infinite;
 }
 
+/* Hide scrollbar on filter pill rows */
+.filter-tabs {
+  scrollbar-width: none;
+}
+.filter-tabs::-webkit-scrollbar {
+  display: none;
+}
+
 /* Styled scrollbar for preset grids */
 .preset-scroll {
   scrollbar-width: thin;

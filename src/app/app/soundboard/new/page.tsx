@@ -494,7 +494,7 @@ export default function NewSoundboardPage() {
               <p className="text-xs text-muted-foreground">
                 Tap a card to select it and hear a short preview. Tap again to stop.
               </p>
-              <div className="flex flex-wrap gap-2">
+              <div className="filter-tabs flex gap-2 overflow-x-auto pb-0.5">
                 <button
                   type="button"
                   disabled={busy}

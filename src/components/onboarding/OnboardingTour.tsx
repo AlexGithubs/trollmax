@@ -53,15 +53,21 @@ interface SpotlightRect {
 
 function getSpotlightRect(selector: string | null, padding = 8): SpotlightRect | null {
   if (!selector) return null
-  const el = document.querySelector(selector)
-  if (!el) return null
-  const r = el.getBoundingClientRect()
-  return {
-    top: r.top - padding,
-    left: r.left - padding,
-    width: r.width + padding * 2,
-    height: r.height + padding * 2,
+  // Use querySelectorAll so we find the first *visible* match.
+  // Sidebar items have display:none on mobile — their rects are all-zero.
+  const els = document.querySelectorAll(selector)
+  for (const el of els) {
+    const r = el.getBoundingClientRect()
+    if (r.width > 0 || r.height > 0) {
+      return {
+        top: r.top - padding,
+        left: r.left - padding,
+        width: r.width + padding * 2,
+        height: r.height + padding * 2,
+      }
+    }
   }
+  return null
 }
 
 interface TooltipPosition {
@@ -69,8 +75,12 @@ interface TooltipPosition {
   left: number
 }
 
-const TOOLTIP_W = 340
-const TOOLTIP_H = 290
+const TOOLTIP_W = 320
+const TOOLTIP_H = 220
+// lg breakpoint — below this the sidebar is hidden and a bottom nav bar is shown
+const DESKTOP_BREAKPOINT = 1024
+const BOTTOM_NAV_H = 64
+const MOBILE_HEADER_H = 64
 
 function computeTooltipPosition(
   spot: SpotlightRect | null,
@@ -79,7 +89,9 @@ function computeTooltipPosition(
   const vw = window.innerWidth
   const vh = window.innerHeight
   const margin = 16
-  const w = Math.min(TOOLTIP_W, vw - margin * 2)
+  const isDesktop = vw >= DESKTOP_BREAKPOINT
+  // Must match the width formula used in TourOverlay to avoid left/width mismatch
+  const w = isDesktop ? Math.min(TOOLTIP_W, vw - margin * 2) : vw - margin * 2
 
   if (!spot || placement === "center") {
     return {
@@ -88,6 +100,22 @@ function computeTooltipPosition(
     }
   }
 
+  // ── Mobile / tablet: anchor the card to bottom of screen by default ─────────
+  // The scroll logic above positions the element top just below the header,
+  // so a bottom-anchored card can never cover it.
+  // Exception: element is near the bottom (e.g. bottom-nav items) → card at top.
+  if (!isDesktop) {
+    const cardAtBottomTop = vh - TOOLTIP_H - margin - BOTTOM_NAV_H
+    // If the element's TOP is inside the bottom card zone, flip to top
+    const elementNearBottom = spot.top > cardAtBottomTop - 60
+    const cardTop = elementNearBottom ? MOBILE_HEADER_H + margin : cardAtBottomTop
+    return {
+      top: Math.round(Math.max(MOBILE_HEADER_H + 4, cardTop)),
+      left: margin,
+    }
+  }
+
+  // ── Desktop: position adjacent to the spotlight ───────────────────────────
   let top = 0
   let left = 0
 
@@ -221,15 +249,41 @@ export function OnboardingTour() {
     // For elements off-screen we scroll smoothly then update positions;
     // the card remains visible at the old position during the scroll and
     // glides to the new one once we measure.
-    const targetEl = currentStep.targetSelector
-      ? document.querySelector(currentStep.targetSelector)
-      : null
 
-    if (targetEl && !isInViewport(targetEl)) {
-      targetEl.scrollIntoView({ behavior: "smooth", block: "center" })
-      timerRef.current = setTimeout(() => {
+    // Use querySelectorAll so we skip hidden sidebar elements on mobile
+    let targetEl: Element | null = null
+    if (currentStep.targetSelector) {
+      for (const el of document.querySelectorAll(currentStep.targetSelector)) {
+        const r = el.getBoundingClientRect()
+        if (r.width > 0 || r.height > 0) { targetEl = el; break }
+      }
+    }
+
+    const isMobile = window.innerWidth < DESKTOP_BREAKPOINT
+
+    if (targetEl) {
+      const rect = targetEl.getBoundingClientRect()
+      if (isMobile) {
+        // On mobile, scroll so the element TOP sits just below the sticky header.
+        // This keeps the element's beginning visible while the card sits at the bottom.
+        const desiredTop = MOBILE_HEADER_H + 12
+        const delta = rect.top - desiredTop
+        if (Math.abs(delta) > 40) {
+          window.scrollTo({ top: Math.max(0, window.scrollY + delta), behavior: "smooth" })
+          timerRef.current = setTimeout(() => {
+            rafRef.current = requestAnimationFrame(measureAndShow)
+          }, SCROLL_SETTLE_MS)
+        } else {
+          rafRef.current = requestAnimationFrame(measureAndShow)
+        }
+      } else if (!isInViewport(targetEl)) {
+        targetEl.scrollIntoView({ behavior: "smooth", block: "center" })
+        timerRef.current = setTimeout(() => {
+          rafRef.current = requestAnimationFrame(measureAndShow)
+        }, SCROLL_SETTLE_MS)
+      } else {
         rafRef.current = requestAnimationFrame(measureAndShow)
-      }, SCROLL_SETTLE_MS)
+      }
     } else {
       rafRef.current = requestAnimationFrame(measureAndShow)
     }
@@ -438,9 +492,12 @@ function TourOverlay({
 }: OverlayProps) {
   const vw = typeof window !== "undefined" ? window.innerWidth : 1280
   const vh = typeof window !== "undefined" ? window.innerHeight : 800
+  const isDesktop = vw >= DESKTOP_BREAKPOINT
   const r = spotRect
   const hasSpot = r !== null && isOnCorrectPage && step.targetSelector !== null
-  const tooltipW = Math.min(TOOLTIP_W, vw - 32)
+  // Must match the width formula in computeTooltipPosition
+  const margin = 16
+  const tooltipW = isDesktop ? Math.min(TOOLTIP_W, vw - margin * 2) : vw - margin * 2
   const isLast = stepIndex === totalSteps - 1
 
   const fadeStyle = {

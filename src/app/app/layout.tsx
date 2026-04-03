@@ -76,10 +76,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </Link>
           <div className="flex shrink-0 items-center gap-2">
             {user ? (
-              <span className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-2 py-1 text-xs font-semibold">
+              <Link
+                data-tour="credits-widget"
+                href="/pricing"
+                className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-2 py-1 text-xs font-semibold hover:bg-primary/20 transition-colors"
+              >
                 {ent?.bananaCreditsBalance ?? 5}
                 <img src={currencyIconSrc()} alt={currencyIconAlt()} className="h-6 w-6 object-contain" />
-              </span>
+              </Link>
             ) : (
               <SignInMobileButton />
             )}
@@ -87,8 +91,38 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </div>
         </header>
 
-        <main className="flex-1 p-6">{children}</main>
+        <main className="flex-1 p-6 pb-24 lg:pb-6">{children}</main>
       </div>
+
+      {/* Mobile bottom nav */}
+      <nav className="fixed bottom-0 inset-x-0 z-40 flex h-16 items-stretch border-t border-border/50 bg-background/95 backdrop-blur-md supports-[backdrop-filter]:bg-background/80 lg:hidden">
+        {user && (
+          <Link
+            href="/app"
+            className="flex flex-1 flex-col items-center justify-center gap-0.5 text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <LayoutDashboard className="h-5 w-5" />
+            <span className="text-[10px] font-medium">Dashboard</span>
+          </Link>
+        )}
+        <Link
+          href={user ? "/app/video" : "/app/video/new"}
+          data-tour="nav-video"
+          className="flex flex-1 flex-col items-center justify-center gap-0.5 text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <Video className="h-5 w-5" />
+          <span className="text-[10px] font-medium">Video</span>
+        </Link>
+        <Link
+          href={user ? "/app/soundboard" : "/app/soundboard/new"}
+          data-tour="nav-soundboard"
+          className="flex flex-1 flex-col items-center justify-center gap-0.5 text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <Mic2 className="h-5 w-5" />
+          <span className="text-[10px] font-medium">Soundboard</span>
+        </Link>
+      </nav>
+
       <OnboardingTour />
     </div>
   )
