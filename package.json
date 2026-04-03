@@ -9,7 +9,8 @@
     "build:webpack": "next build",
     "start": "next start",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "download-previews": "node --env-file=.env.local scripts/download-voice-previews.mjs"
   },
   "dependencies": {
     "@clerk/backend": "3.2.3",

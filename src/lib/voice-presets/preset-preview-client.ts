@@ -65,9 +65,9 @@ export function toggleOrPlayPresetPreview(presetId: string): void {
 
   stopPresetPreview()
 
-  // ?v=1 busts any stale cached responses from earlier broken deployments.
-  // Increment when the audio serving implementation changes significantly.
-  const src = `/api/voice-presets/${encodeURIComponent(presetId)}/preview-audio?v=1`
+  // Static MP3 files committed to the repo — no API calls, no range-request
+  // issues, no iOS Safari quirks. Run `npm run download-previews` to refresh.
+  const src = `/voice-presets/previews/${encodeURIComponent(presetId)}.mp3`
   const audio = new Audio(src)
   const multiplier = getVoicePresetVolumeMultiplier(presetId)
 
