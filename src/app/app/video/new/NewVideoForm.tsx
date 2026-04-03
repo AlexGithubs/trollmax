@@ -18,7 +18,11 @@ import {
   Image as ImageIcon,
   Trash2,
   Info,
+  Loader2,
+  CheckCircle2,
+  Clock,
 } from "lucide-react"
+import { trimAndEncodeAudio } from "@/lib/audio/trim-and-encode"
 import type { SoundboardManifest } from "@/lib/manifests/types"
 import type {
   VoicePresetPublic,
@@ -123,9 +127,19 @@ const BACKGROUNDS = [
 
 type Stage = "form" | "generating" | "done"
 
-type VoiceKind = "preset" | "board"
+type VoiceKind = "preset" | "board" | "upload"
+
+type VoiceUploadStage = "idle" | "processing" | "uploading" | "uploaded"
 
 type TtsAvailability = { replicate: boolean; elevenlabs: boolean }
+
+async function deleteVoiceSampleOnServer(url: string) {
+  await fetch("/api/upload", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
+  })
+}
 
 interface Props {
   boards: SoundboardManifest[]
@@ -156,6 +170,17 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
   )
   const [selectedBoardId, setSelectedBoardId] = useState(boards[0]?.id ?? "")
   const [ttsAvail, setTtsAvail] = useState<TtsAvailability | null>(null)
+
+  // Voice upload state
+  const [voiceUploadStage, setVoiceUploadStage] = useState<VoiceUploadStage>("idle")
+  const [voiceSampleUrl, setVoiceSampleUrl] = useState("")
+  const [voiceSamplePreviewUrl, setVoiceSamplePreviewUrl] = useState("")
+  const [voiceSampleDuration, setVoiceSampleDuration] = useState(0)
+  const [voiceSampleName, setVoiceSampleName] = useState("")
+  const [voiceUploadRefText, setVoiceUploadRefText] = useState("")
+  const [voiceUploadError, setVoiceUploadError] = useState("")
+  const [removingVoiceSample, setRemovingVoiceSample] = useState(false)
+  const voiceFileInputRef = useRef<HTMLInputElement>(null)
   const [backgroundVideoId, setBackgroundVideoId] = useState("minecraft")
   const selectedPreset = presets.find((p) => p.id === selectedPresetId)
   const selectedBoard = boards.find((b) => b.id === selectedBoardId)
@@ -201,13 +226,87 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
   const [consent, setConsent] = useState(false)
   const headshotInputRef = useRef<HTMLInputElement>(null)
 
+  // Revoke voice preview object URL on unmount
+  useEffect(() => {
+    return () => {
+      if (voiceSamplePreviewUrl) URL.revokeObjectURL(voiceSamplePreviewUrl)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voiceSamplePreviewUrl])
+
   const canUsePresets = presets.length > 0
   const canUseBoards = boards.length > 0
+
+  const voiceUploadBusy = voiceUploadStage === "processing" || voiceUploadStage === "uploading" || removingVoiceSample
 
   const voiceReady =
     voiceKind === "preset"
       ? Boolean(selectedPresetId && selectedPreset?.status === "active")
-      : Boolean(selectedBoardId && selectedBoard)
+      : voiceKind === "board"
+      ? Boolean(selectedBoardId && selectedBoard)
+      : Boolean(voiceSampleUrl)
+
+  async function handleVoiceFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const prevUrl = voiceSampleUrl
+    setVoiceUploadError("")
+    setVoiceUploadStage("processing")
+
+    let processedFile: File
+    try {
+      const trimmed = await trimAndEncodeAudio(file)
+      const usedClientWav = trimmed !== file
+      processedFile = usedClientWav
+        ? new File([trimmed], file.name.replace(/\.\w+$/, ".wav"), { type: "audio/wav" })
+        : file
+    } catch (err) {
+      setVoiceUploadError(err instanceof Error ? err.message : "Could not process audio")
+      setVoiceUploadStage("idle")
+      return
+    }
+
+    setVoiceUploadStage("uploading")
+    const fd = new FormData()
+    fd.append("file", processedFile)
+
+    try {
+      const res = await fetch("/api/upload", { method: "POST", body: fd })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? "Upload failed")
+      setVoiceSampleUrl(data.url)
+      setVoiceSamplePreviewUrl(URL.createObjectURL(processedFile))
+      setVoiceSampleDuration(data.durationSeconds)
+      setVoiceSampleName(file.name)
+      setVoiceUploadStage("uploaded")
+      if (prevUrl && prevUrl !== data.url) {
+        void deleteVoiceSampleOnServer(prevUrl).catch(() => {})
+      }
+    } catch (err) {
+      setVoiceUploadError(err instanceof Error ? err.message : "Upload failed")
+      setVoiceUploadStage("idle")
+    }
+  }
+
+  async function removeVoiceSample() {
+    if (!voiceSampleUrl) return
+    setVoiceUploadError("")
+    setRemovingVoiceSample(true)
+    try {
+      await deleteVoiceSampleOnServer(voiceSampleUrl)
+      if (voiceSamplePreviewUrl) URL.revokeObjectURL(voiceSamplePreviewUrl)
+      setVoiceSampleUrl("")
+      setVoiceSamplePreviewUrl("")
+      setVoiceSampleName("")
+      setVoiceSampleDuration(0)
+      setVoiceUploadStage("idle")
+      if (voiceFileInputRef.current) voiceFileInputRef.current.value = ""
+    } catch (err) {
+      setVoiceUploadError(err instanceof Error ? err.message : "Could not delete file")
+    } finally {
+      setRemovingVoiceSample(false)
+    }
+  }
 
   async function deleteHeadshotOnServer(url: string) {
     const res = await fetch("/api/headshot-upload", {
@@ -398,6 +497,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
     }
     if (!videoTitle.trim()) return setError("Enter a name for this video.")
     if (!script.trim()) return setError("Enter a script.")
+    if (voiceKind === "upload" && !voiceSampleUrl) return setError("Upload a voice sample first.")
     if (!voiceReady) return setError("Select a voice.")
     if (voiceKind === "preset" && selectedPreset?.status !== "active") {
       return setError("This preset is coming soon. Please choose an active preset.")
@@ -409,35 +509,45 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
         "Preset voices require ElevenLabs. Add the ElevenLabs API key or use a soundboard with Replicate."
       )
     }
+    if (voiceKind === "upload" && ttsAvail && !ttsAvail.elevenlabs) {
+      return setError(
+        "Uploaded voice requires ElevenLabs. Add the ElevenLabs API key or use a soundboard voice."
+      )
+    }
 
     setStage("generating")
 
     try {
+      const sharedFields = {
+        title: videoTitle.trim(),
+        script: script.trim(),
+        backgroundVideoId,
+        headshotImageUrl,
+        talkingMode,
+        captionsEnabled,
+        consentAcknowledged: true as const,
+      }
+
       const createBody =
         voiceKind === "preset"
           ? {
-              title: videoTitle.trim(),
-              script: script.trim(),
+              ...sharedFields,
               voicePresetId: selectedPresetId!,
               ttsTier: "elevenlabs" as const,
-              backgroundVideoId,
-              headshotImageUrl,
-              talkingMode,
-              captionsEnabled,
-              consentAcknowledged: true as const,
+            }
+          : voiceKind === "upload"
+          ? {
+              ...sharedFields,
+              voiceId: voiceSampleUrl,
+              ttsTier: "elevenlabs" as const,
+              ...(voiceUploadRefText.trim() ? { voiceRefText: voiceUploadRefText.trim() } : {}),
             }
           : {
-              title: videoTitle.trim(),
-              script: script.trim(),
+              ...sharedFields,
               soundboardId: selectedBoard!.id,
               ...(selectedBoard?.voiceRefText?.trim()
                 ? { voiceRefText: selectedBoard.voiceRefText.trim() }
                 : {}),
-              backgroundVideoId,
-              headshotImageUrl,
-              talkingMode,
-              captionsEnabled,
-              consentAcknowledged: true as const,
             }
 
       const createRes = await fetch("/api/video", {
@@ -532,7 +642,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
     )
   }
 
-  const noVoicesAtAll = !canUsePresets && !canUseBoards
+  const noVoicesAtAll = false // upload tab is always available
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
@@ -625,6 +735,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
         <CardContent className="pt-5 space-y-3">
           <p className="text-sm font-medium">2. Voice</p>
 
+          {/* Three-way tab bar */}
           <div className="flex rounded-lg border border-border/50 p-0.5 bg-secondary/20">
             <button
               type="button"
@@ -656,8 +767,22 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
               <Mic2 className="h-3.5 w-3.5" />
               My soundboards
             </button>
+            <button
+              type="button"
+              onClick={() => setVoiceKind("upload")}
+              className={[
+                "flex flex-1 items-center justify-center gap-1.5 rounded-md py-2 text-xs font-medium transition-colors",
+                voiceKind === "upload"
+                  ? "bg-card text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
+              ].join(" ")}
+            >
+              <Upload className="h-3.5 w-3.5" />
+              Upload voice
+            </button>
           </div>
 
+          {/* Preset voices panel */}
           {voiceKind === "preset" && canUsePresets && (
             <div className="space-y-3">
               <p className="text-xs text-muted-foreground">
@@ -709,7 +834,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
                       void toggleOrPlayPresetPreview(p.id)
                     }}
                     className={[
-                      "flex min-w-[140px] shrink-0 flex-col gap-2 rounded-xl border p-3 text-left transition-colors sm:min-w-0",
+                      "flex flex-col gap-2 rounded-xl border p-3 text-left transition-colors",
                       selected
                         ? "border-primary bg-primary/5 ring-2 ring-primary/40"
                         : "border-border/50 bg-card/40 hover:border-border",
@@ -740,9 +865,13 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
                   })}
                 </div>
               </div>
+              <div className="rounded-lg border border-border/50 bg-secondary/10 px-3 py-2 text-xs text-muted-foreground">
+                Preset voices use <span className="font-medium text-foreground">ElevenLabs</span>. Use <span className="text-foreground">My soundboards</span> for Replicate F5.
+              </div>
             </div>
           )}
 
+          {/* My soundboards panel */}
           {voiceKind === "board" && canUseBoards && (
             <select
               value={selectedBoardId}
@@ -757,14 +886,127 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
             </select>
           )}
 
-          {voiceKind === "preset" && (
-            <div className="rounded-lg border border-border/50 bg-secondary/10 px-3 py-2 text-xs text-muted-foreground">
-              Preset voices use <span className="font-medium text-foreground">ElevenLabs</span> for this
-              flow. Use <span className="text-foreground">My soundboards</span> if you want Replicate F5.
+          {/* Upload voice panel */}
+          {voiceKind === "upload" && (
+            <div className="space-y-3">
+              {/* Slower-generation notice */}
+              <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5">
+                <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-400" />
+                <p className="text-xs text-amber-200/90">
+                  Your sample is cloned via ElevenLabs Instant Voice Clone, then used to generate the video. Takes a bit longer than preset voices — usually a few extra minutes.
+                </p>
+              </div>
+
+              <input
+                ref={voiceFileInputRef}
+                type="file"
+                accept="audio/*,video/*,.m4a,.mp3,.wav,.ogg,.flac,.opus,.mp4,.mov,.webm,.mkv"
+                className="hidden"
+                onChange={handleVoiceFileChange}
+              />
+
+              {voiceSampleUrl && voiceUploadStage === "uploaded" ? (
+                <div className="flex items-center gap-3 rounded-xl border border-border/50 bg-secondary/20 p-3">
+                  <CheckCircle2 className="h-5 w-5 shrink-0 text-primary" />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium" title={voiceSampleName}>
+                      {voiceSampleName || "Voice sample"}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {voiceSampleDuration > 0
+                        ? `${voiceSampleDuration.toFixed(1)}s · Ready`
+                        : "Uploaded"}
+                    </p>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="text-xs"
+                      disabled={voiceUploadBusy}
+                      onClick={() => voiceFileInputRef.current?.click()}
+                    >
+                      <Upload className="mr-1.5 h-3.5 w-3.5" />
+                      Replace
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="text-xs text-destructive hover:text-destructive"
+                      disabled={voiceUploadBusy || removingVoiceSample}
+                      onClick={removeVoiceSample}
+                    >
+                      {removingVoiceSample ? (
+                        <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                      )}
+                      Remove
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  disabled={voiceUploadBusy}
+                  onClick={() => voiceFileInputRef.current?.click()}
+                  className="flex w-full flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border/60 bg-secondary/10 px-4 py-6 text-center transition-colors hover:border-primary/40 hover:bg-primary/5 disabled:opacity-60"
+                >
+                  {voiceUploadBusy ? (
+                    <>
+                      <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                      <span className="text-sm text-muted-foreground">
+                        {voiceUploadStage === "processing" ? "Processing audio…" : "Uploading…"}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="h-6 w-6 text-muted-foreground" />
+                      <div>
+                        <p className="text-sm font-medium">Click to upload voice sample</p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          MP3, WAV, M4A, or video with audio · 6–60 sec · 15 MB max
+                        </p>
+                      </div>
+                    </>
+                  )}
+                </button>
+              )}
+
+              {voiceUploadError && (
+                <p className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                  {voiceUploadError}
+                </p>
+              )}
+
+              {/* Optional preview playback */}
+              {voiceSamplePreviewUrl && (
+                <audio src={voiceSamplePreviewUrl} controls className="h-8 w-full" />
+              )}
+
+              {/* Reference transcript */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground">
+                  Reference transcript <span className="font-normal opacity-70">(optional — improves similarity)</span>
+                </label>
+                <textarea
+                  value={voiceUploadRefText}
+                  onChange={(e) => setVoiceUploadRefText(e.target.value)}
+                  placeholder="Paste what the voice sample is saying…"
+                  maxLength={1000}
+                  rows={3}
+                  className="w-full rounded-md border border-border/60 bg-secondary/20 px-3 py-2 text-sm outline-none focus:border-primary/60 resize-none"
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  If your sample is someone saying "Hey everyone, welcome back to my channel…", paste that here. The model uses it to match rhythm and pronunciation.
+                </p>
+              </div>
             </div>
           )}
 
-          {!canUsePresets && !canUseBoards && (
+          {!canUsePresets && !canUseBoards && voiceKind !== "upload" && (
             <p className="text-xs text-muted-foreground">No voice sources available.</p>
           )}
         </CardContent>
@@ -1019,6 +1261,10 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
                   ? selectedPreset
                     ? `Preset - ${selectedPreset.label}`
                     : "Preset - none selected"
+                  : voiceKind === "upload"
+                  ? voiceSampleUrl
+                    ? `Upload - ${voiceSampleName || "sample"}`
+                    : "Upload - not uploaded"
                   : selectedBoard
                     ? `Soundboard - ${selectedBoard.title}`
                     : "Soundboard - none selected"}
@@ -1072,7 +1318,8 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
               !voiceReady ||
               !consent ||
               !headshotImageUrl ||
-              headshotUploading
+              headshotUploading ||
+              voiceUploadBusy
         }
         className="group h-14 w-full justify-between rounded-2xl px-5 text-base font-semibold shadow-lg shadow-primary/20 transition-all hover:shadow-xl hover:shadow-primary/30 disabled:shadow-none"
         size="lg"

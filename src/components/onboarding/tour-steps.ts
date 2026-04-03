@@ -89,7 +89,7 @@ export const TOUR_STEPS: TourStep[] = [
     page: "/app/video/new",
     targetSelector: '[data-tour="video-voice-tabs"]',
     title: "2. Pick a Voice",
-    content: "Choose a preset AI voice or use a voice from your soundboards. Presets use ElevenLabs; your clones use Replicate F5.",
+    content: "Choose a preset AI voice, use a cloned soundboard voice, or upload your own audio sample. Presets are fastest; uploading takes a couple extra minutes.",
     placement: "bottom",
     spotlightPadding: 6,
   },

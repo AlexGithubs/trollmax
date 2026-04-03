@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server"
-import { currentUser } from "@clerk/nextjs/server"
 import {
   getVoicePresetById,
   resolvePresetProviderVoiceId,
@@ -10,16 +9,12 @@ import { get as getBlob, put as putBlob } from "@vercel/blob"
 /**
  * Proxies ElevenLabs preview (CDN or sample audio API) through our origin so the
  * client can `new Audio(sameOriginUrl).play()` from a click handler.
+ * No auth required — previews are free listening samples available to all visitors.
  */
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ presetId: string }> }
 ) {
-  const user = await currentUser()
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
-
   const { presetId } = await params
   const preset = getVoicePresetById(decodeURIComponent(presetId))
   if (!preset) {

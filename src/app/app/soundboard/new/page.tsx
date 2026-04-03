@@ -539,7 +539,7 @@ export default function NewSoundboardPage() {
                       disabled={busy || comingSoon}
                       onClick={() => onPresetCardInteract(p)}
                       className={[
-                        "flex min-w-[140px] shrink-0 flex-col gap-2 rounded-xl border p-3 text-left transition-colors sm:min-w-0",
+                        "flex flex-col gap-2 rounded-xl border p-3 text-left transition-colors",
                         selected
                           ? "border-primary bg-primary/5 ring-2 ring-primary/40"
                           : "border-border/50 bg-card/40 hover:border-border",
