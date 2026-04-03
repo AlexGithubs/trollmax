@@ -66,7 +66,7 @@ export default async function VideoSharePage({
 
           <VideoShareLink shareUrl={shareUrl} />
 
-          <VideoPlayer videoUrl={manifest.videoUrl} />
+          <VideoPlayer videoUrl={manifest.videoUrl} videoId={id} />
 
           <div className="rounded-xl border border-border/40 bg-card/20 px-5 py-4 text-center">
             <p className="text-sm text-muted-foreground">Want to make your own?</p>

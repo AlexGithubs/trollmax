@@ -16,6 +16,7 @@ import type {
   SynthesizeResult,
 } from "../types"
 import { getFileStore } from "@/lib/storage"
+import { blobUrlForExternalFetch } from "@/lib/storage/blob"
 import { nanoid } from "nanoid"
 
 export class ReplicateF5TTSProvider implements TTSProvider {
@@ -35,9 +36,13 @@ export class ReplicateF5TTSProvider implements TTSProvider {
   }
 
   async synthesize(opts: SynthesizeOptions): Promise<SynthesizeResult> {
+    const refAudio = opts.voiceId.trim().startsWith("http")
+      ? await blobUrlForExternalFetch(opts.voiceId.trim())
+      : opts.voiceId.trim()
+
     const output = await this.client.run("x-lance/f5-tts:87faf6dd7a692dd82043f662e76369cab126a2cf1937e25a9d41e0b834fd230e", {
       input: {
-        ref_audio: opts.voiceId,
+        ref_audio: refAudio,
         ref_text: opts.refText ?? "",
         gen_text: opts.text,
         remove_silence: true,

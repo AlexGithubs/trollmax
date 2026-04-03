@@ -4,6 +4,7 @@ import { NextResponse } from "next/server"
 import { currentUser } from "@clerk/nextjs/server"
 import Replicate from "replicate"
 import { getManifestStore, getFileStore } from "@/lib/storage"
+import { blobUrlForExternalFetch } from "@/lib/storage/blob"
 import { getVideoComposer } from "@/lib/providers"
 import { resolveVideoVoiceForGenerate } from "@/lib/tts/resolve-voice-for-generate"
 import { checkRateLimit } from "@/lib/rate-limit"
@@ -136,6 +137,7 @@ export async function POST(
       text: scriptForSpeech,
       ...(synth.refText ? { refText: synth.refText } : {}),
     })
+    const audioUrlForFetch = await blobUrlForExternalFetch(audioUrl)
 
     const captionsEnabled = manifest.captionsEnabled !== false
     let captions = [] as VideoManifest["captions"]
@@ -150,7 +152,7 @@ export async function POST(
             "thomasmol/whisper-diarization:1495a9cddc83b2203b0d8d3516e38b80fd1572ebc4bc5700ac1da56a9b3ed886",
             {
               input: {
-                file_url: audioUrl,
+                file_url: audioUrlForFetch,
                 language: "en",
               },
             }
@@ -208,6 +210,8 @@ export async function POST(
       // Per D-ID docs, Authorization header is `Basic API_USERNAME:API_PASSWORD` (not base64).
       const didAuthHeader = `Basic ${didUsername}:${didPassword}`
 
+      const headshotForDid = await blobUrlForExternalFetch(manifest.headshotImageUrl)
+
       const createRes = await fetch("https://api.d-id.com/talks", {
         method: "POST",
         headers: {
@@ -215,10 +219,10 @@ export async function POST(
           Authorization: didAuthHeader,
         },
         body: JSON.stringify({
-          source_url: manifest.headshotImageUrl,
+          source_url: headshotForDid,
           script: {
             type: "audio",
-            audio_url: audioUrl,
+            audio_url: audioUrlForFetch,
             subtitles: false,
           },
           name: manifest.title,
@@ -318,7 +322,7 @@ export async function POST(
       manifest.voicePresetId
     )
     const composeOpts = {
-      audioUrl,
+      audioUrl: audioUrlForFetch,
       backgroundVideoUrl: getBackgroundAsset(manifest.backgroundVideoId),
       captions,
       outputFormat: "mp4" as const,

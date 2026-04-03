@@ -3,10 +3,9 @@
  * - In mock/dev (no Upstash): in-memory Map, resets on server restart.
  * - In prod: Upstash Redis INCR + EXPIRE.
  *
- * Higher caps: TROLLMAX_RATE_LIMIT_RELAXED_USER_IDS and/or TROLLMAX_BILLING_ADMIN_USER_IDS
- * (Clerk does not control these — they are app-side limits in this file).
+ * Higher caps: `TROLLMAX_ADMIN_USER_IDS` (and legacy billing / relaxed envs — see admin.ts).
  */
-import { isBillingAdmin } from "@/lib/billing/admin"
+import { hasElevatedRateLimit } from "@/lib/billing/admin"
 import { notifyAppRateLimitHit } from "@/lib/ops/rate-limit-alert"
 
 const LIMITS: Record<string, number> = {
@@ -15,7 +14,7 @@ const LIMITS: Record<string, number> = {
   create: 20, // per hour
 }
 
-/** Per-hour caps for users listed in TROLLMAX_RATE_LIMIT_RELAXED_USER_IDS */
+/** Per-hour caps for admin / elevated-rate users (see hasElevatedRateLimit). */
 const RELAXED_LIMITS: Record<string, number> = {
   upload: 500,
   generate: 500,
@@ -24,17 +23,8 @@ const RELAXED_LIMITS: Record<string, number> = {
 
 const WINDOW_MS = 60 * 60 * 1000 // 1 hour
 
-function listRelaxedRateLimitUserIds(): string[] {
-  const raw = process.env.TROLLMAX_RATE_LIMIT_RELAXED_USER_IDS?.trim()
-  if (!raw) return []
-  return raw
-    .split(",")
-    .map((id) => id.trim())
-    .filter(Boolean)
-}
-
 function limitForUser(userId: string, action: "upload" | "generate" | "create"): number {
-  if (listRelaxedRateLimitUserIds().includes(userId) || isBillingAdmin(userId)) {
+  if (hasElevatedRateLimit(userId)) {
     return RELAXED_LIMITS[action]
   }
   return LIMITS[action]

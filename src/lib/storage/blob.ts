@@ -1,6 +1,10 @@
 /**
  * Vercel Blob adapter.
  * Only used when BLOB_READ_WRITE_TOKEN is set.
+ *
+ * Stores are often **private-only** in Vercel (no public access). All uploads use
+ * `access: "private"` by default. For Replicate, D-ID, Modal, etc., use
+ * {@link blobUrlForExternalFetch} to obtain a short-lived signed URL.
  */
 import { del, head, put } from "@vercel/blob"
 import type { FileStore } from "./types"
@@ -8,7 +12,6 @@ import type { FileStore } from "./types"
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 async function waitUntilBlobIsReadable(url: string): Promise<void> {
-  // Blob propagation can be briefly eventual; avoid returning URLs that still 503.
   for (let attempt = 0; attempt < 8; attempt++) {
     try {
       const res = await fetch(url, { method: "HEAD" })
@@ -20,15 +23,29 @@ async function waitUntilBlobIsReadable(url: string): Promise<void> {
   }
 }
 
-/**
- * Returns true if the URL points to a private (non-CDN) Vercel Blob.
- * Public blobs contain ".public.blob.vercel-storage.com"; private blobs do not.
- */
-function isPrivateVercelBlob(url: string): boolean {
+/** True when the URL is a Vercel Blob that is not on the public CDN hostname. */
+export function isPrivateVercelBlobUrl(url: string): boolean {
   return (
     url.includes("blob.vercel-storage.com") &&
     !url.includes(".public.blob.vercel-storage.com")
   )
+}
+
+/**
+ * Replicate, D-ID, Whisper-on-Replicate, Modal FFmpeg, etc. fetch assets without our auth.
+ * Private blob canonical URLs are not directly readable; use a signed `downloadUrl`.
+ * Public blob URLs and normal HTTPS URLs are returned unchanged.
+ */
+export async function blobUrlForExternalFetch(url: string): Promise<string> {
+  const u = url.trim()
+  if (!u.startsWith("http")) return u
+  if (!isPrivateVercelBlobUrl(u)) return u
+  const meta = await head(u)
+  const signed = meta.downloadUrl
+  if (!signed) {
+    throw new Error("blobUrlForExternalFetch: missing downloadUrl for private blob")
+  }
+  return signed
 }
 
 /**
@@ -42,7 +59,7 @@ export async function downloadBlobBuffer(
   let fetchUrl = url
   let contentTypeHint = "audio/mpeg"
 
-  if (isPrivateVercelBlob(url)) {
+  if (isPrivateVercelBlobUrl(url)) {
     const meta = await head(url)
     fetchUrl = meta.downloadUrl
     contentTypeHint = meta.contentType ?? contentTypeHint
@@ -59,11 +76,15 @@ export async function downloadBlobBuffer(
 }
 
 export class VercelBlobStore implements FileStore {
+  /**
+   * Defaults to **private** — required when the Vercel Blob store is configured
+   * as private-only ("Cannot use public access on a private store").
+   */
   async upload(
     path: string,
     buffer: Buffer,
     contentType: string,
-    access: "public" | "private" = "public"
+    access: "public" | "private" = "private"
   ): Promise<{ url: string }> {
     const blob = await put(path, buffer, { access, contentType })
     if (access === "public" && blob.url.includes(".public.blob.vercel-storage.com")) {

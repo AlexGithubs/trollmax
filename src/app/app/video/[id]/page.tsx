@@ -119,7 +119,7 @@ export default async function ManageVideoPage({
       {manifest.status === "complete" && manifest.videoUrl && (
         <>
           <VideoShareLink shareUrl={shareUrl} />
-          <VideoPlayer videoUrl={manifest.videoUrl} />
+          <VideoPlayer videoUrl={manifest.videoUrl} videoId={id} />
         </>
       )}
 

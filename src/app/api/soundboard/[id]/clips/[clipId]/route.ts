@@ -1,5 +1,6 @@
 import { currentUser } from "@clerk/nextjs/server"
 import { getManifestStore } from "@/lib/storage"
+import { blobUrlForExternalFetch } from "@/lib/storage/blob"
 import type { SoundboardManifest } from "@/lib/manifests/types"
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -54,7 +55,8 @@ export async function GET(
 
   let upstream: Response
   try {
-    upstream = await fetchWithRetry(sourceUrl)
+    const fetchUrl = await blobUrlForExternalFetch(sourceUrl)
+    upstream = await fetchWithRetry(fetchUrl)
   } catch {
     return new Response("Clip unavailable", { status: 503 })
   }

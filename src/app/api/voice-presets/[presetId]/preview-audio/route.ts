@@ -73,7 +73,7 @@ export async function GET(
       `voice-presets/previews/${voiceId}.mp3`,
       audio.bytes,
       {
-        access: "public",
+        access: "private",
         contentType: audio.contentType,
         addRandomSuffix: false,
         token: process.env.BLOB_READ_WRITE_TOKEN,
