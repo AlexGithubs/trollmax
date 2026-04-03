@@ -660,7 +660,7 @@ export default function NewSoundboardPage() {
           <input
             ref={fileInputRef}
             type="file"
-            accept="audio/*,video/*,.mp4,.mov,.m4v,.webm,.mkv,.avi"
+            accept="audio/*,video/*"
             className="hidden"
             onChange={handleFileChange}
           />

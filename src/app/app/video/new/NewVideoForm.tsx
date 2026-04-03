@@ -902,7 +902,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
               <input
                 ref={voiceFileInputRef}
                 type="file"
-                accept="audio/*,video/*,.m4a,.mp3,.wav,.ogg,.flac,.opus,.mp4,.mov,.webm,.mkv"
+                accept="audio/*,video/*"
                 className="hidden"
                 onChange={handleVoiceFileChange}
               />

@@ -14,7 +14,7 @@ import { downloadBlobBuffer } from "@/lib/storage/blob"
 function sanitizeVoiceName(raw: string): string {
   const cleaned = raw
     .trim()
-    .replace(/[^a-zA-Z0-9 \-_.']/g, " ")
+    .replace(/[^a-zA-Z0-9 \-_.]/g, " ")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 100)
