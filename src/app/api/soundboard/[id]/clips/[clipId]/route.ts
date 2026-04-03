@@ -26,7 +26,7 @@ async function fetchWithRetry(url: string): Promise<Response> {
 }
 
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string; clipId: string }> }
 ) {
   const { id, clipId } = await params
@@ -57,17 +57,63 @@ export async function GET(
   try {
     const fetchUrl = await blobUrlForExternalFetch(sourceUrl)
     upstream = await fetchWithRetry(fetchUrl)
-  } catch {
+  } catch (err) {
+    console.error("[soundboard/clips] blob fetch setup failed:", clipId, err)
     return new Response("Clip unavailable", { status: 503 })
   }
 
   if (!upstream.ok) {
+    console.error(
+      "[soundboard/clips] upstream not ok:",
+      clipId,
+      upstream.status,
+      sourceUrl.slice(0, 80)
+    )
     return new Response("Clip unavailable", { status: 503 })
   }
 
-  return new Response(upstream.body, {
+  // Buffer instead of piping upstream.body — streaming passthrough often returns 503 on Vercel
+  // when the fetch ReadableStream does not complete cleanly in the platform.
+  let buf: Buffer
+  try {
+    buf = Buffer.from(await upstream.arrayBuffer())
+  } catch (err) {
+    console.error("[soundboard/clips] arrayBuffer failed:", clipId, err)
+    return new Response("Clip unavailable", { status: 503 })
+  }
+
+  const contentType = upstream.headers.get("content-type") ?? "audio/mpeg"
+  const total = buf.length
+  const range = req.headers.get("range")
+
+  if (range && total > 0) {
+    const m = /^bytes=(\d+)-(\d*)$/.exec(range.trim())
+    if (m) {
+      const start = Math.min(parseInt(m[1], 10), Math.max(0, total - 1))
+      let end = m[2] ? parseInt(m[2], 10) : total - 1
+      end = Math.min(end, total - 1)
+      if (start <= end) {
+        const chunk = new Uint8Array(buf.subarray(start, end + 1))
+        return new Response(chunk, {
+          status: 206,
+          headers: {
+            "Content-Type": contentType,
+            "Content-Length": String(chunk.length),
+            "Content-Range": `bytes ${start}-${end}/${total}`,
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "public, max-age=3600",
+          },
+        })
+      }
+    }
+  }
+
+  return new Response(new Uint8Array(buf), {
+    status: 200,
     headers: {
-      "Content-Type": upstream.headers.get("content-type") ?? "audio/wav",
+      "Content-Type": contentType,
+      "Content-Length": String(total),
+      "Accept-Ranges": "bytes",
       "Cache-Control": "public, max-age=3600",
     },
   })
