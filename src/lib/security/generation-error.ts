@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { NextResponse } from "next/server"
+import { isGenerationConfigError } from "@/lib/generation/errors"
 import { isLikelyUpstreamRateLimit, notifyOpsRateLimitEvent } from "@/lib/ops/rate-limit-alert"
 
 const UPSTREAM_BUSY_MESSAGE =
@@ -18,6 +19,12 @@ export function jsonGenerationErrorResponse(
   status = 500
 ): NextResponse {
   const ref = logGenerationFailure(scope, err)
+  if (isGenerationConfigError(err)) {
+    return NextResponse.json(
+      { error: err.message, code: err.code, ref },
+      { status: 503 }
+    )
+  }
   if (isLikelyUpstreamRateLimit(err)) {
     notifyOpsRateLimitEvent({
       kind: "upstream",

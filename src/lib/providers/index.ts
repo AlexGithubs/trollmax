@@ -1,4 +1,5 @@
 import type { TtsTier } from "@/lib/manifests/types"
+import { GenerationConfigError } from "@/lib/generation/errors"
 import type { TTSProvider, CaptionsProvider, VideoComposer } from "./types"
 import { MockTTSProvider } from "./tts/mock"
 import { MockCaptionsProvider } from "./captions/mock"
@@ -16,7 +17,7 @@ export function getTtsProviderForTier(tier: TtsTier): TTSProvider {
   switch (tier) {
     case "replicate": {
       if (!process.env.REPLICATE_API_TOKEN?.trim()) {
-        throw new Error(
+        throw new GenerationConfigError(
           "REPLICATE_API_TOKEN is required for the Replicate (okay) TTS tier."
         )
       }
@@ -26,7 +27,7 @@ export function getTtsProviderForTier(tier: TtsTier): TTSProvider {
     }
     case "elevenlabs": {
       if (!process.env.ELEVENLABS_API_KEY?.trim()) {
-        throw new Error(
+        throw new GenerationConfigError(
           "ELEVENLABS_API_KEY is required for the ElevenLabs (great) TTS tier."
         )
       }

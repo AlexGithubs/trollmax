@@ -131,7 +131,11 @@ type VoiceKind = "preset" | "board" | "upload"
 
 type VoiceUploadStage = "idle" | "processing" | "uploading" | "uploaded"
 
-type TtsAvailability = { replicate: boolean; elevenlabs: boolean }
+type TtsAvailability = {
+  replicate: boolean
+  elevenlabs: boolean
+  elevenlabsPresetVoicesReady?: boolean
+}
 
 async function deleteVoiceSampleOnServer(url: string) {
   await fetch("/api/upload", {
@@ -507,6 +511,11 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
     if (voiceKind === "preset" && ttsAvail && !ttsAvail.elevenlabs) {
       return setError(
         "Preset voices require ElevenLabs. Add the ElevenLabs API key or use a soundboard with Replicate."
+      )
+    }
+    if (voiceKind === "preset" && ttsAvail?.elevenlabsPresetVoicesReady === false) {
+      return setError(
+        "Preset video voices need every VOICE_PRESET_*_PROVIDER_ID set in Vercel (see your .env.example). Add those env vars or use a soundboard / upload flow instead."
       )
     }
     if (voiceKind === "upload" && ttsAvail && !ttsAvail.elevenlabs) {
@@ -902,7 +911,6 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
               <input
                 ref={voiceFileInputRef}
                 type="file"
-                accept="audio/*,video/*"
                 className="hidden"
                 onChange={handleVoiceFileChange}
               />

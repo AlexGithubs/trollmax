@@ -3,6 +3,7 @@
  * (see providerVoiceIdEnv). Legacy refAudioUrl/refText apply when using F5-TTS / XTTS.
  */
 
+import { GenerationConfigError } from "@/lib/generation/errors"
 import { VOICE_PRESET_CATEGORIES, type VoicePresetCategory } from "./categories"
 import { VOICE_PRESET_ENTRIES } from "./presets-data"
 import type { VoicePreset, VoicePresetPublic } from "./types"
@@ -69,9 +70,20 @@ export function assertActivePresetProviderVoiceId(preset: VoicePreset): string {
   const voiceId = resolvePresetProviderVoiceId(preset)
   if (!voiceId) {
     const key = preset.providerVoiceIdEnv ?? `provider voice id for ${preset.id}`
-    throw new Error(`Preset is active but missing configured trained voice ID (${key}).`)
+    throw new GenerationConfigError(
+      `ElevenLabs preset "${preset.label}" is missing its voice ID. Set ${key} in the server environment (Vercel → Env).`
+    )
   }
   return voiceId
+}
+
+/** True when every active catalog preset has a resolved ElevenLabs provider voice id. */
+export function activePresetsHaveElevenLabsVoiceIds(): boolean {
+  for (const p of PRESETS) {
+    if (p.status !== "active") continue
+    if (!resolvePresetProviderVoiceId(p)?.trim()) return false
+  }
+  return true
 }
 
 /** Turn preset ref path into an absolute URL for Replicate / storage. */

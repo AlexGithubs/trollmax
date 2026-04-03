@@ -107,7 +107,11 @@ export default function NewSoundboardPage() {
   const [voiceRefText, setVoiceRefText] = useState("")
 
   type TtsTier = "replicate" | "elevenlabs"
-  type TtsAvailability = { replicate: boolean; elevenlabs: boolean }
+  type TtsAvailability = {
+    replicate: boolean
+    elevenlabs: boolean
+    elevenlabsPresetVoicesReady?: boolean
+  }
   const [ttsTier, setTtsTier] = useState<TtsTier>("elevenlabs")
   const [ttsAvail, setTtsAvail] = useState<TtsAvailability | null>(null)
 
@@ -128,6 +132,17 @@ export default function NewSoundboardPage() {
       cancelled = true
     }
   }, [])
+
+  useEffect(() => {
+    if (
+      voiceMode === "preset" &&
+      ttsAvail?.elevenlabsPresetVoicesReady === false &&
+      ttsTier === "elevenlabs" &&
+      ttsAvail.replicate
+    ) {
+      setTtsTier("replicate")
+    }
+  }, [voiceMode, ttsAvail, ttsTier])
 
   useEffect(() => {
     let cancelled = false
@@ -316,6 +331,15 @@ export default function NewSoundboardPage() {
       if (!ok) {
         return setError(
           "Selected voice quality is not configured. Pick another tier or add API keys."
+        )
+      }
+      if (
+        voiceMode === "preset" &&
+        ttsTier === "elevenlabs" &&
+        ttsAvail.elevenlabsPresetVoicesReady === false
+      ) {
+        return setError(
+          "Preset voices need ElevenLabs voice IDs on the server. In Vercel, set every VOICE_PRESET_*_PROVIDER_ID from your env template, or use Good (Replicate) for presets until those are configured."
         )
       }
     }
@@ -660,7 +684,6 @@ export default function NewSoundboardPage() {
           <input
             ref={fileInputRef}
             type="file"
-            accept="audio/*,video/*"
             className="hidden"
             onChange={handleFileChange}
           />
@@ -674,10 +697,12 @@ export default function NewSoundboardPage() {
                   { id: "elevenlabs" as const, label: "Great", hint: "ElevenLabs" },
                 ] as const
               ).map((opt) => {
+                const presetBlocksEl =
+                  voiceMode === "preset" && ttsAvail?.elevenlabsPresetVoicesReady === false
                 const enabled =
                   !ttsAvail ||
                   (opt.id === "replicate" && ttsAvail.replicate) ||
-                  (opt.id === "elevenlabs" && ttsAvail.elevenlabs)
+                  (opt.id === "elevenlabs" && ttsAvail.elevenlabs && !presetBlocksEl)
                 return (
                   <button
                     key={opt.id}

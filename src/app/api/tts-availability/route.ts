@@ -1,5 +1,6 @@
 import { currentUser } from "@clerk/nextjs/server"
 import { NextResponse } from "next/server"
+import { activePresetsHaveElevenLabsVoiceIds } from "@/lib/voice-presets/catalog"
 
 /**
  * Which TTS backends are configured (no secrets exposed).
@@ -15,8 +16,11 @@ export async function GET() {
     return NextResponse.json({ ok: true as const })
   }
 
+  const elevenlabs = Boolean(process.env.ELEVENLABS_API_KEY?.trim())
   return NextResponse.json({
     replicate: Boolean(process.env.REPLICATE_API_TOKEN?.trim()),
-    elevenlabs: Boolean(process.env.ELEVENLABS_API_KEY?.trim()),
+    elevenlabs,
+    /** Preset characters need one VOICE_PRESET_*_PROVIDER_ID each; uploads only need the API key. */
+    elevenlabsPresetVoicesReady: elevenlabs && activePresetsHaveElevenLabsVoiceIds(),
   })
 }
