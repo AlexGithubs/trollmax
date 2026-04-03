@@ -65,7 +65,9 @@ export function toggleOrPlayPresetPreview(presetId: string): void {
 
   stopPresetPreview()
 
-  const src = `/api/voice-presets/${encodeURIComponent(presetId)}/preview-audio`
+  // ?v=1 busts any stale cached responses from earlier broken deployments.
+  // Increment when the audio serving implementation changes significantly.
+  const src = `/api/voice-presets/${encodeURIComponent(presetId)}/preview-audio?v=1`
   const audio = new Audio(src)
   const multiplier = getVoicePresetVolumeMultiplier(presetId)
 
@@ -82,20 +84,29 @@ export function toggleOrPlayPresetPreview(presetId: string): void {
     try {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext
       if (AudioCtx) {
-        if (!globalAudioCtx) globalAudioCtx = new AudioCtx()
+        if (!globalAudioCtx || globalAudioCtx.state === "closed") {
+          globalAudioCtx = new AudioCtx()
+        }
         const ctx = globalAudioCtx
-        // Resume immediately to satisfy autoplay/user-gesture policies.
-        void ctx.resume().catch(() => {})
 
-        globalSourceNode = ctx.createMediaElementSource(audio)
-        globalGainNode = ctx.createGain()
-        globalGainNode.gain.value = multiplier
-
-        globalSourceNode.connect(globalGainNode)
-        globalGainNode.connect(ctx.destination)
+        if (ctx.state === "running") {
+          // Context already running — use WebAudio for full amplification.
+          globalSourceNode = ctx.createMediaElementSource(audio)
+          globalGainNode = ctx.createGain()
+          globalGainNode.gain.value = multiplier
+          globalSourceNode.connect(globalGainNode)
+          globalGainNode.connect(ctx.destination)
+        } else {
+          // Context is suspended (common on first iOS interaction).
+          // Resume it for future taps, but play natively this time so the
+          // audio is never silent. HTMLAudioElement.volume caps at 1.0, so
+          // amplification > 1× isn't possible, but audible > silent.
+          void ctx.resume().catch(() => {})
+          audio.volume = Math.min(1, multiplier)
+        }
       }
     } catch {
-      // Fallback to native playback if WebAudio fails.
+      // Fallback to native playback if WebAudio fails entirely.
       audio.volume = 1
       audio.muted = false
       if (globalSourceNode) globalSourceNode = null
