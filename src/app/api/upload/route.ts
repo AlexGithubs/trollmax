@@ -5,6 +5,7 @@ import { NextResponse } from "next/server"
 import { currentUser } from "@clerk/nextjs/server"
 import { parseBlob } from "music-metadata"
 import { nanoid } from "nanoid"
+import { getBlobPutAccess } from "@/lib/storage/blob-env-sync"
 import { getFileStore } from "@/lib/storage"
 import { userOwnsSampleUploadUrl } from "@/lib/storage/sample-upload-url"
 import { checkRateLimit } from "@/lib/rate-limit"
@@ -192,7 +193,7 @@ export async function POST(req: Request) {
       `samples/${user.id}/${nanoid()}.${storeExt}`,
       buffer,
       storeMime,
-      "private"
+      getBlobPutAccess()
     )
     url = result.url
   } catch (err) {

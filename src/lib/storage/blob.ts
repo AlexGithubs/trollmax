@@ -1,12 +1,14 @@
+import { getBlobPutAccess } from "./blob-env-sync"
+
 /**
  * Vercel Blob adapter.
  * Only used when BLOB_READ_WRITE_TOKEN is set.
  *
- * Stores are often **private-only** in Vercel (no public access). All uploads use
- * `access: "private"` by default. For Replicate, D-ID, Modal, etc., use
- * {@link blobUrlForExternalFetch} to obtain a short-lived signed URL.
+ * Prefer a **private** Vercel Blob store. Upload access defaults to `getBlobPutAccess()`
+ * (`private`, or `public` when `BLOB_UPLOAD_ACCESS=public` matches a public-only store).
+ * For Replicate, D-ID, Modal, etc., use {@link blobUrlForExternalFetch} for private blobs.
  */
-import { del, head, put } from "@vercel/blob"
+import { del, get, head, put } from "@vercel/blob"
 import type { FileStore } from "./types"
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -32,8 +34,11 @@ export function isPrivateVercelBlobUrl(url: string): boolean {
 }
 
 /**
- * Replicate, D-ID, Whisper-on-Replicate, Modal FFmpeg, etc. fetch assets without our auth.
- * Private blob canonical URLs are not directly readable; use a signed `downloadUrl`.
+ * Replicate, Whisper-on-Replicate, Modal FFmpeg, etc. fetch assets without our auth.
+ * D-ID `source_url` rejects Vercel private signed URLs; headshots use `POST /images` instead
+ * (see `didSourceUrlFromHeadshotBuffer`). Private blob canonical URLs are not anonymously readable;
+ * `head().downloadUrl` is not enough for server-side `fetch` (403). For **this app’s server**, use
+ * {@link downloadBlobBuffer} (`get` + bearer). For **third-party HTTP** fetchers, `downloadUrl` may still apply.
  * Public blob URLs and normal HTTPS URLs are returned unchanged.
  */
 export async function blobUrlForExternalFetch(url: string): Promise<string> {
@@ -50,44 +55,50 @@ export async function blobUrlForExternalFetch(url: string): Promise<string> {
 
 /**
  * Download a Vercel Blob (public or private) server-side and return its buffer.
- * For private blobs the Vercel Blob SDK is used to obtain a signed download URL
- * before fetching — the BLOB_READ_WRITE_TOKEN env var must be set.
+ *
+ * **Private** blobs must be read with `get(..., { access: "private" })` so the SDK
+ * sends `Authorization: Bearer` — anonymous `fetch(head().downloadUrl)` returns 403.
  */
 export async function downloadBlobBuffer(
   url: string
 ): Promise<{ buffer: Buffer; contentType: string }> {
-  let fetchUrl = url
-  let contentTypeHint = "audio/mpeg"
-
   if (isPrivateVercelBlobUrl(url)) {
-    const meta = await head(url)
-    fetchUrl = meta.downloadUrl
-    contentTypeHint = meta.contentType ?? contentTypeHint
+    const result = await get(url, { access: "private", useCache: false })
+    if (!result || result.statusCode !== 200 || !result.stream) {
+      throw new Error(
+        `downloadBlobBuffer: private blob unreadable (${result?.statusCode ?? "null"}) for ${url.slice(0, 80)}`
+      )
+    }
+    const buffer = Buffer.from(await new Response(result.stream).arrayBuffer())
+    const contentType =
+      result.blob.contentType?.split(";")[0]?.trim() || "application/octet-stream"
+    return { buffer, contentType }
   }
 
-  const res = await fetch(fetchUrl, { redirect: "follow" })
+  const res = await fetch(url, { redirect: "follow" })
   if (!res.ok) {
     throw new Error(`downloadBlobBuffer: fetch failed (${res.status}) for ${url.slice(0, 80)}`)
   }
   return {
     buffer: Buffer.from(await res.arrayBuffer()),
-    contentType: res.headers.get("content-type")?.split(";")[0]?.trim() ?? contentTypeHint,
+    contentType:
+      res.headers.get("content-type")?.split(";")[0]?.trim() ?? "audio/mpeg",
   }
 }
 
 export class VercelBlobStore implements FileStore {
   /**
-   * Defaults to **private** — required when the Vercel Blob store is configured
-   * as private-only ("Cannot use public access on a private store").
+   * Uses {@link getBlobPutAccess} when `access` is omitted (see `BLOB_UPLOAD_ACCESS`).
    */
   async upload(
     path: string,
     buffer: Buffer,
     contentType: string,
-    access: "public" | "private" = "private"
+    access?: "public" | "private"
   ): Promise<{ url: string }> {
-    const blob = await put(path, buffer, { access, contentType })
-    if (access === "public" && blob.url.includes(".public.blob.vercel-storage.com")) {
+    const resolved = access ?? getBlobPutAccess()
+    const blob = await put(path, buffer, { access: resolved, contentType })
+    if (resolved === "public" && blob.url.includes(".public.blob.vercel-storage.com")) {
       await waitUntilBlobIsReadable(blob.url)
     }
     return { url: blob.url }

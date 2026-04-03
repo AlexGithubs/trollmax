@@ -1,3 +1,5 @@
+import "@/lib/storage/blob-env-sync"
+
 /**
  * Validates env vars that must be present for real generation/storage on Vercel.
  * Mock mode skips checks (local / tests).

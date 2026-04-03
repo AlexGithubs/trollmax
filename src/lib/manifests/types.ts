@@ -72,7 +72,7 @@ export interface VideoManifest extends BaseManifest {
   soundboardId?: string
   audioUrl: string
   backgroundVideoId: string
-  /** Publicly reachable photo URL used as the D-ID source image.
+  /** Stored headshot URL (often Vercel Blob). Server sends bytes to D-ID `POST /images`; not passed as `source_url` raw.
    * Cleared (set to "") after D-ID generation so the blob can be deleted. */
   headshotImageUrl: string
   /** Layout for combining D-ID talking head + background video */

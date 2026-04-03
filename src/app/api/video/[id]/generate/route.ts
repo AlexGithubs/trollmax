@@ -5,6 +5,7 @@ import { currentUser } from "@clerk/nextjs/server"
 import Replicate from "replicate"
 import { getManifestStore, getFileStore } from "@/lib/storage"
 import { blobUrlForExternalFetch } from "@/lib/storage/blob"
+import { didSourceUrlFromHeadshotBuffer } from "@/lib/d-id/upload-headshot-for-talk"
 import { getVideoComposer } from "@/lib/providers"
 import { resolveVideoVoiceForGenerate } from "@/lib/tts/resolve-voice-for-generate"
 import { checkRateLimit } from "@/lib/rate-limit"
@@ -210,7 +211,10 @@ export async function POST(
       // Per D-ID docs, Authorization header is `Basic API_USERNAME:API_PASSWORD` (not base64).
       const didAuthHeader = `Basic ${didUsername}:${didPassword}`
 
-      const headshotForDid = await blobUrlForExternalFetch(manifest.headshotImageUrl)
+      const headshotForDid = await didSourceUrlFromHeadshotBuffer(
+        manifest.headshotImageUrl,
+        didAuthHeader
+      )
 
       const createRes = await fetch("https://api.d-id.com/talks", {
         method: "POST",

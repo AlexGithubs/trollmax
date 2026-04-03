@@ -40,6 +40,14 @@ import { videoGenerationCostBananaCredits } from "@/lib/billing/video-generation
 // D-ID is strict about image size; we target a safer ceiling before upload.
 const DID_HEADSHOT_TARGET_BYTES = 9_000_000
 
+/** Same rule as server `isPrivateVercelBlobUrl` — private blob URLs are not usable as `<img src>`. */
+function isPrivateVercelBlobUrlClient(url: string): boolean {
+  return (
+    url.includes("blob.vercel-storage.com") &&
+    !url.includes(".public.blob.vercel-storage.com")
+  )
+}
+
 /**
  * When the browser can decode the file, re-encode to JPEG under the byte target.
  * Throws if decoding fails (e.g. HEIC on unsupported browsers) so the server can normalize.
@@ -451,6 +459,9 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
       setHeadshotName(file.name)
       setHeadshotPreviewUrl((cur) => {
         if (cur.startsWith("blob:")) URL.revokeObjectURL(cur)
+        if (jpegFile && isPrivateVercelBlobUrlClient(finalUrl)) {
+          return URL.createObjectURL(jpegFile)
+        }
         return finalUrl
       })
 

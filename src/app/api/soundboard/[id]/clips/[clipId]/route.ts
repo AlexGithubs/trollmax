@@ -1,28 +1,23 @@
 import { currentUser } from "@clerk/nextjs/server"
 import { getManifestStore } from "@/lib/storage"
-import { blobUrlForExternalFetch } from "@/lib/storage/blob"
+import { downloadBlobBuffer } from "@/lib/storage/blob"
 import type { SoundboardManifest } from "@/lib/manifests/types"
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
-async function fetchWithRetry(url: string): Promise<Response> {
-  let lastResponse: Response | null = null
-
+async function downloadClipWithRetry(
+  sourceUrl: string
+): Promise<{ buffer: Buffer; contentType: string }> {
+  let lastErr: unknown
   for (let attempt = 0; attempt < 6; attempt++) {
     try {
-      const res = await fetch(url, { cache: "no-store" })
-      if (res.ok) return res
-      lastResponse = res
-      if (res.status !== 503 && res.status !== 429 && res.status < 500) break
-    } catch {
-      // Retry transient fetch errors.
+      return await downloadBlobBuffer(sourceUrl)
+    } catch (e) {
+      lastErr = e
+      await sleep(300 * (attempt + 1))
     }
-
-    await sleep(300 * (attempt + 1))
   }
-
-  if (lastResponse) return lastResponse
-  throw new Error("Clip fetch failed")
+  throw lastErr instanceof Error ? lastErr : new Error("Clip fetch failed")
 }
 
 export async function GET(
@@ -53,36 +48,16 @@ export async function GET(
     return new Response("Invalid clip source", { status: 400 })
   }
 
-  let upstream: Response
-  try {
-    const fetchUrl = await blobUrlForExternalFetch(sourceUrl)
-    upstream = await fetchWithRetry(fetchUrl)
-  } catch (err) {
-    console.error("[soundboard/clips] blob fetch setup failed:", clipId, err)
-    return new Response("Clip unavailable", { status: 503 })
-  }
-
-  if (!upstream.ok) {
-    console.error(
-      "[soundboard/clips] upstream not ok:",
-      clipId,
-      upstream.status,
-      sourceUrl.slice(0, 80)
-    )
-    return new Response("Clip unavailable", { status: 503 })
-  }
-
-  // Buffer instead of piping upstream.body — streaming passthrough often returns 503 on Vercel
-  // when the fetch ReadableStream does not complete cleanly in the platform.
   let buf: Buffer
+  let contentType: string
   try {
-    buf = Buffer.from(await upstream.arrayBuffer())
+    const d = await downloadClipWithRetry(sourceUrl)
+    buf = d.buffer
+    contentType = d.contentType || "audio/mpeg"
   } catch (err) {
-    console.error("[soundboard/clips] arrayBuffer failed:", clipId, err)
+    console.error("[soundboard/clips] download failed:", clipId, sourceUrl.slice(0, 80), err)
     return new Response("Clip unavailable", { status: 503 })
   }
-
-  const contentType = upstream.headers.get("content-type") ?? "audio/mpeg"
   const total = buf.length
   const range = req.headers.get("range")
 

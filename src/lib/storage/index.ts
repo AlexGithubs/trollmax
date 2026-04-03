@@ -1,3 +1,4 @@
+import "./blob-env-sync"
 import type { ManifestStore, FileStore } from "./types"
 import { MockManifestStore } from "./mock-store"
 
@@ -30,7 +31,7 @@ export function getFileStore(): FileStore {
     const { MockFileStore } = require("./mock-store") as typeof import("./mock-store")
     _fileStore = new MockFileStore()
   } else if (process.env.BLOB_READ_WRITE_TOKEN) {
-    // Vercel Blob — uploads default to private; Replicate/D-ID use signed URLs via blobUrlForExternalFetch
+    // Vercel Blob — upload access from getBlobPutAccess() (BLOB_UPLOAD_ACCESS); Replicate uses signed URLs for private blobs
     const { VercelBlobStore } = require("./blob") as typeof import("./blob")
     _fileStore = new VercelBlobStore()
   } else {

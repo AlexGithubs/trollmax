@@ -1,3 +1,4 @@
+import { getBlobPutAccess } from "@/lib/storage/blob-env-sync"
 import { NextResponse } from "next/server"
 import {
   getVoicePresetById,
@@ -68,15 +69,16 @@ export async function GET(
 
   // Fire-and-forget: cache to Vercel Blob so warm serverless instances benefit
   // from the in-process TTS cache and cold starts can be optimised later.
-  if (process.env.BLOB_READ_WRITE_TOKEN) {
+  const blobToken = process.env.BLOB_READ_WRITE_TOKEN?.trim()
+  if (blobToken) {
     putBlob(
       `voice-presets/previews/${voiceId}.mp3`,
       audio.bytes,
       {
-        access: "private",
+        access: getBlobPutAccess(),
         contentType: audio.contentType,
         addRandomSuffix: false,
-        token: process.env.BLOB_READ_WRITE_TOKEN,
+        token: blobToken,
       }
     ).catch(() => {
       // Non-fatal — still serving bytes below.
