@@ -35,8 +35,9 @@ export function isPrivateVercelBlobUrl(url: string): boolean {
 
 /**
  * Replicate, Whisper-on-Replicate, Modal FFmpeg, etc. fetch assets without our auth.
- * D-ID `source_url` rejects Vercel private signed URLs; headshots use `POST /images` instead
- * (see `didSourceUrlFromHeadshotBuffer`). Private blob canonical URLs are not anonymously readable;
+ * D-ID rejects Vercel private signed URLs for `source_url` and `audio_url`; use `POST /images` and
+ * `POST /audios` instead (`didSourceUrlFromHeadshotBuffer`, `didAudioUrlFromBlobUrl`). Private blob
+ * canonical URLs are not anonymously readable;
  * `head().downloadUrl` is not enough for server-side `fetch` (403). For **this app’s server**, use
  * {@link downloadBlobBuffer} (`get` + bearer). For **third-party HTTP** fetchers, `downloadUrl` may still apply.
  * Public blob URLs and normal HTTPS URLs are returned unchanged.

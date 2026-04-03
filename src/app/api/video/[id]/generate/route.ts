@@ -5,6 +5,7 @@ import { currentUser } from "@clerk/nextjs/server"
 import Replicate from "replicate"
 import { getManifestStore, getFileStore } from "@/lib/storage"
 import { blobUrlForExternalFetch } from "@/lib/storage/blob"
+import { didAudioUrlFromBlobUrl } from "@/lib/d-id/upload-audio-for-talk"
 import { didSourceUrlFromHeadshotBuffer } from "@/lib/d-id/upload-headshot-for-talk"
 import { getVideoComposer } from "@/lib/providers"
 import { resolveVideoVoiceForGenerate } from "@/lib/tts/resolve-voice-for-generate"
@@ -215,6 +216,7 @@ export async function POST(
         manifest.headshotImageUrl,
         didAuthHeader
       )
+      const audioUrlForDid = await didAudioUrlFromBlobUrl(audioUrl, didAuthHeader)
 
       const createRes = await fetch("https://api.d-id.com/talks", {
         method: "POST",
@@ -226,7 +228,7 @@ export async function POST(
           source_url: headshotForDid,
           script: {
             type: "audio",
-            audio_url: audioUrlForFetch,
+            audio_url: audioUrlForDid,
             subtitles: false,
           },
           name: manifest.title,
