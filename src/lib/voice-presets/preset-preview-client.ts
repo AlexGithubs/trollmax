@@ -65,7 +65,7 @@ export function toggleOrPlayPresetPreview(presetId: string): void {
 
   stopPresetPreview()
 
-  const src = `/api/voice-presets/${encodeURIComponent(presetId)}/preview-audio?t=${Date.now()}`
+  const src = `/api/voice-presets/${encodeURIComponent(presetId)}/preview-audio`
   const audio = new Audio(src)
   const multiplier = getVoicePresetVolumeMultiplier(presetId)
 
