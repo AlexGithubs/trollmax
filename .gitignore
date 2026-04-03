@@ -36,6 +36,9 @@ yarn-error.log*
 # vercel
 .vercel
 
+# local dev asset storage (used by LocalFileStore in place of Vercel Blob)
+/.dev-assets
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

@@ -1,0 +1,15 @@
+{
+    "keep": {
+        "days": true,
+        "amount": 14
+    },
+    "auditLog": "/Users/alexshvartsman/Desktop/coding/trollmax/logs/.f9819bfe8f3d70d991a38636ded8d80df0d2cf7e-audit.json",
+    "files": [
+        {
+            "date": 1773190755152,
+            "name": "/Users/alexshvartsman/Desktop/coding/trollmax/logs/mcp-puppeteer-2026-03-10.log",
+            "hash": "dcfc4f8d511de1a4522c311e4af7aedad32b6e0b87ca40a6be60b020dc1cd734"
+        }
+    ],
+    "hashType": "sha256"
+}
