@@ -1,4 +1,5 @@
 import Link from "next/link"
+import { AppMobileBottomNav } from "@/components/layout/AppMobileBottomNav"
 import { AppUserButton } from "@/components/layout/AppUserButton"
 import { OnboardingTour, TourRestartButton } from "@/components/onboarding/OnboardingTour"
 import { SignInBalanceLink, SignInMobileButton, SignInSidebarButton } from "@/components/layout/SignInLink"
@@ -53,11 +54,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         <nav className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-3">
           {user && <NavLink href="/app" icon={LayoutDashboard} label="Dashboard" />}
           <NavLink
-            href={user ? "/app/video" : "/app/video/new"}
+            href="/app/video"
             icon={Video} label="Video" cost="2" tourId="nav-video"
           />
           <NavLink
-            href={user ? "/app/soundboard" : "/app/soundboard/new"}
+            href="/app/soundboard"
             icon={Mic2} label="Soundboard" cost="1" tourId="nav-soundboard"
           />
         </nav>
@@ -96,34 +97,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         </main>
       </div>
 
-      {/* Mobile bottom nav */}
-      <nav className="fixed bottom-0 inset-x-0 z-40 flex h-16 items-stretch border-t border-border/50 bg-background/95 backdrop-blur-md supports-[backdrop-filter]:bg-background/80 lg:hidden">
-        {user && (
-          <Link
-            href="/app"
-            className="flex flex-1 flex-col items-center justify-center gap-0.5 text-muted-foreground transition-colors hover:text-foreground"
-          >
-            <LayoutDashboard className="h-5 w-5" />
-            <span className="text-[10px] font-medium">Dashboard</span>
-          </Link>
-        )}
-        <Link
-          href={user ? "/app/video" : "/app/video/new"}
-          data-tour="nav-video"
-          className="flex flex-1 flex-col items-center justify-center gap-0.5 text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <Video className="h-5 w-5" />
-          <span className="text-[10px] font-medium">Video</span>
-        </Link>
-        <Link
-          href={user ? "/app/soundboard" : "/app/soundboard/new"}
-          data-tour="nav-soundboard"
-          className="flex flex-1 flex-col items-center justify-center gap-0.5 text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <Mic2 className="h-5 w-5" />
-          <span className="text-[10px] font-medium">Soundboard</span>
-        </Link>
-      </nav>
+      <AppMobileBottomNav showDashboard={Boolean(user)} />
 
       <OnboardingTour />
     </div>

@@ -1,9 +1,9 @@
-import { redirect } from "next/navigation"
 import { currentUser } from "@clerk/nextjs/server"
 import Link from "next/link"
 import { getManifestStore } from "@/lib/storage"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { GuestMediaEmptyCtas } from "@/components/layout/GuestMediaEmptyCtas"
 import { Video, Plus, Share2 } from "lucide-react"
 import type { VideoManifest } from "@/lib/manifests/types"
 import { DeleteVideoButton } from "@/components/video/DeleteVideoButton"
@@ -19,7 +19,29 @@ const STATUS_BADGE: Record<VideoManifest["status"], { label: string; className: 
 
 export default async function VideoListPage() {
   const user = await currentUser()
-  if (!user) redirect("/sign-in")
+  if (!user) {
+    return (
+      <div className="mx-auto max-w-3xl space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Your Videos</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Sign in to keep a library here, or jump straight into the creator.
+          </p>
+        </div>
+        <div className="rounded-xl border border-dashed border-border/60 bg-card/30 p-10 text-center space-y-4">
+          <Video className="mx-auto h-8 w-8 text-muted-foreground/50" />
+          <p className="text-sm text-muted-foreground">
+            You don&apos;t have any saved videos yet. Make your first video — you can sign in later to
+            save it to this list.
+          </p>
+          <GuestMediaEmptyCtas
+            createHref="/app/video/new"
+            createLabel="Make your first video"
+          />
+        </div>
+      </div>
+    )
+  }
 
   const store = getManifestStore()
   const ids = await store.smembers(`user:${user.id}:videos`)
@@ -58,11 +80,9 @@ export default async function VideoListPage() {
       {videos.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border/60 bg-card/30 p-10 text-center space-y-3">
           <Video className="mx-auto h-8 w-8 text-muted-foreground/50" />
-          <p className="text-sm text-muted-foreground">
-            No videos yet.
-          </p>
+          <p className="text-sm text-muted-foreground">No videos yet — create one to see it here.</p>
           <Button asChild size="sm" variant="outline">
-            <Link href="/app/video/new">Create your first video</Link>
+            <Link href="/app/video/new">Make your first video</Link>
           </Button>
         </div>
       ) : (

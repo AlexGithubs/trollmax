@@ -63,18 +63,24 @@ test("/app redirects to Clerk sign-in when logged out", async ({ page }) => {
   await page.screenshot({ path: "tests/screenshots/app-redirect.png" })
 })
 
-test("/app/soundboard redirects to Clerk sign-in when logged out", async ({ page }) => {
+test("/app/soundboard — guest can open list (empty state, no Clerk redirect)", async ({ page }) => {
   await page.goto(`${BASE}/app/soundboard`)
-  await expect(page).not.toHaveURL(`${BASE}/app/soundboard`)
-  const url = page.url()
-  expect(url.includes("clerk") || url.includes("sign-in") || url.includes("accounts.")).toBe(true)
+  await expect(page).toHaveURL(`${BASE}/app/soundboard`)
+  await expect(page.getByRole("heading", { name: /Your Soundboards/i })).toBeVisible()
+  await expect(page.getByRole("link", { name: /Make your first soundboard/i })).toBeVisible()
 })
 
-test("/app/soundboard/new redirects to Clerk sign-in when logged out", async ({ page }) => {
+test("/app/soundboard/new — guest can open creator (no Clerk redirect)", async ({ page }) => {
   await page.goto(`${BASE}/app/soundboard/new`)
-  await expect(page).not.toHaveURL(`${BASE}/app/soundboard/new`)
-  const url = page.url()
-  expect(url.includes("clerk") || url.includes("sign-in") || url.includes("accounts.")).toBe(true)
+  await expect(page).toHaveURL(`${BASE}/app/soundboard/new`)
+  await expect(page.getByRole("heading", { name: /New Soundboard/i })).toBeVisible()
+})
+
+test("/app/video — guest can open list (empty state, no Clerk redirect)", async ({ page }) => {
+  await page.goto(`${BASE}/app/video`)
+  await expect(page).toHaveURL(`${BASE}/app/video`)
+  await expect(page.getByRole("heading", { name: /Your Videos/i })).toBeVisible()
+  await expect(page.getByRole("link", { name: /Make your first video/i })).toBeVisible()
 })
 
 // ── Share routes ─────────────────────────────────────────────────────────────

@@ -2,16 +2,20 @@ import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server"
 
 const isProtectedRoute = createRouteMatcher(["/app(.*)"])
 
-// These form pages are intentionally browsable without auth.
-// Auth is enforced at the "Generate" action instead.
-const isPublicFormRoute = createRouteMatcher([
-  "/app/video/new",
-  "/app/soundboard/new",
-])
+/** Exact paths under /app that guests may open (lists + create flows). Sub-routes like /app/video/:id stay protected. */
+function isPublicAppSurface(pathname: string): boolean {
+  const p = pathname.replace(/\/$/, "") || "/"
+  return (
+    p === "/app/video" ||
+    p === "/app/soundboard" ||
+    p === "/app/video/new" ||
+    p === "/app/soundboard/new"
+  )
+}
 
 export default clerkMiddleware(
   async (auth, req) => {
-    if (isProtectedRoute(req) && !isPublicFormRoute(req)) {
+    if (isProtectedRoute(req) && !isPublicAppSurface(req.nextUrl.pathname)) {
       await auth.protect()
     }
   },
