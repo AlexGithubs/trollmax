@@ -146,6 +146,10 @@ body {
 .preset-scroll {
   scrollbar-width: thin;
   scrollbar-color: oklch(0.35 0 0) transparent;
+  /* Prevent overscroll from chaining to the document — on mobile Chrome/Safari a
+     downward pull at the top of this scroller can otherwise trigger pull-to-
+     refresh and feel like a full page reload on the first voice tap. */
+  overscroll-behavior-y: contain;
 }
 .preset-scroll::-webkit-scrollbar {
   width: 4px;

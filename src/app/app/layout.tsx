@@ -91,7 +91,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </div>
         </header>
 
-        <main className="flex-1 p-6 pb-24 lg:pb-6">{children}</main>
+        <main className="flex-1 overscroll-y-contain p-6 pb-24 lg:pb-6">
+          {children}
+        </main>
       </div>
 
       {/* Mobile bottom nav */}

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useEffect, useMemo } from "react"
+import { useState, useRef, useEffect, useMemo, type MouseEvent } from "react"
 import { useRouter } from "next/navigation"
 import { useUser, useClerk } from "@clerk/nextjs"
 import { Button } from "@/components/ui/button"
@@ -197,10 +197,15 @@ export default function NewSoundboardPage() {
     return false
   }
 
-  function onPresetCardInteract(p: (typeof presets)[number]) {
+  function onPresetCardInteract(
+    p: (typeof presets)[number],
+    e: MouseEvent<HTMLButtonElement>
+  ) {
+    e.preventDefault()
+    e.stopPropagation()
     if (busy || p.status !== "active") return
     selectPreset(p.id)
-    void toggleOrPlayPresetPreview(p.id)
+    toggleOrPlayPresetPreview(p.id)
   }
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -537,7 +542,7 @@ export default function NewSoundboardPage() {
                       key={p.id}
                       type="button"
                       disabled={busy || comingSoon}
-                      onClick={() => onPresetCardInteract(p)}
+                      onClick={(e) => onPresetCardInteract(p, e)}
                       className={[
                         "flex flex-col gap-2 rounded-xl border p-3 text-left transition-colors",
                         selected

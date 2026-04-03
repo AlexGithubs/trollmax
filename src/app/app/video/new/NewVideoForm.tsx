@@ -828,10 +828,12 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
                     key={p.id}
                     type="button"
                     disabled={comingSoon}
-                    onClick={() => {
+                    onClick={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
                       if (comingSoon) return
                       setSelectedPresetId(p.id)
-                      void toggleOrPlayPresetPreview(p.id)
+                      toggleOrPlayPresetPreview(p.id)
                     }}
                     className={[
                       "flex flex-col gap-2 rounded-xl border p-3 text-left transition-colors",
