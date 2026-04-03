@@ -28,6 +28,28 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 const logCtx = (soundboardId: string) => ({ soundboardId })
 
+/** Logs to Vercel Function / server logs (filter by `[soundboard/generate]`). */
+function genLog(soundboardId: string, step: string, detail?: Record<string, unknown>) {
+  if (detail && Object.keys(detail).length > 0) {
+    console.log(`[soundboard/generate] soundboardId=${soundboardId} step=${step}`, detail)
+  } else {
+    console.log(`[soundboard/generate] soundboardId=${soundboardId} step=${step}`)
+  }
+}
+
+function voiceIdForLog(v: string): { kind: "url" | "id"; preview: string } {
+  const t = v.trim()
+  if (/^https?:\/\//i.test(t)) {
+    try {
+      const u = new URL(t)
+      return { kind: "url", preview: `${u.hostname}${u.pathname.slice(0, 40)}…` }
+    } catch {
+      return { kind: "url", preview: t.slice(0, 60) + (t.length > 60 ? "…" : "") }
+    }
+  }
+  return { kind: "id", preview: t.length > 64 ? `${t.slice(0, 64)}…` : t }
+}
+
 export async function POST(
   _req: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -122,6 +144,15 @@ export async function POST(
   const generationCost =
     BANANA_CREDIT_COSTS.soundboardGenerate +
     (requiresExpansion ? BANANA_CREDIT_COSTS.soundboardExpansion : 0)
+
+  genLog(id, "run_start", {
+    ttsTier: manifest.ttsTier ?? "(legacy infer)",
+    voicePresetId: manifest.voicePresetId ?? null,
+    phraseCount: manifest.phrases.length,
+    generationCost,
+    requiresExpansion,
+  })
+
   const canAfford = await canAffordBananaCredits(user.id, generationCost)
   if (!canAfford) {
     const balance = await getBananaCreditsBalance(user.id)
@@ -174,6 +205,7 @@ export async function POST(
   }
   creditsDebited = generationCost
   const balanceAfterDebit = debit.balance
+  genLog(id, "credits_debited", { generationCost, balanceAfterDebit })
 
   let voiceId: string
   let refTextForSynth: string | undefined
@@ -181,6 +213,7 @@ export async function POST(
 
   try {
     await updateProgress({ progressStep: "Preparing voice…", progressPct: 5 })
+    genLog(id, "voice_prep_begin")
     const persist = async (next: SoundboardManifest) => {
       await store.set(`soundboard:${id}`, JSON.stringify(next))
     }
@@ -188,7 +221,17 @@ export async function POST(
     provider = ctx.provider
     voiceId = ctx.voiceId
     refTextForSynth = ctx.refText
+    genLog(id, "voice_prep_ok", {
+      provider: provider.constructor?.name ?? "TTSProvider",
+      voiceId: voiceIdForLog(voiceId),
+      hasRefText: Boolean(refTextForSynth?.trim()),
+    })
   } catch (err) {
+    console.error(
+      `[soundboard/generate] soundboardId=${id} step=voice_prep_failed`,
+      err instanceof Error ? err.message : err,
+      err instanceof Error ? err.stack : ""
+    )
     await creditBananaCredits(user.id, generationCost).catch((refundErr) => {
       console.error("[soundboard/generate] credit refund failed (voice):", refundErr)
     })
@@ -233,6 +276,7 @@ export async function POST(
     clips = []
     const total = manifest.phrases.length
     const concurrency = Math.max(1, Math.min(3, total))
+    genLog(id, "clips_begin", { total, concurrency })
     let completed = 0
 
     // Preserve original order in output.
@@ -259,6 +303,11 @@ export async function POST(
           const { audioUrl, durationSeconds } = await synthesizeWithRetry(phraseForSpeech)
           results.push({ ok: true, idx, phrase, audioUrl, durationSeconds })
         } catch (error) {
+          console.error(
+            `[soundboard/generate] soundboardId=${id} step=clip_synth_failed clip=${idx + 1}/${total}`,
+            error instanceof Error ? error.message : error,
+            error instanceof Error ? error.stack : ""
+          )
           results.push({ ok: false, idx, phrase, error })
         } finally {
           completed++
@@ -312,6 +361,11 @@ export async function POST(
       })
     }
   } catch (err) {
+    console.error(
+      `[soundboard/generate] soundboardId=${id} step=clips_failed`,
+      err instanceof Error ? err.message : err,
+      err instanceof Error ? err.stack : ""
+    )
     await creditBananaCredits(user.id, generationCost).catch((refundErr) => {
       console.error("[soundboard/generate] credit refund failed (clips):", refundErr)
     })
@@ -346,12 +400,18 @@ export async function POST(
     updatedAt: now,
   }
   await store.set(`soundboard:${id}`, JSON.stringify(updated))
+  genLog(id, "complete", { clipCount: clips.length })
   return NextResponse.json({
     ...updated,
     bananaCreditsCharged: generationCost,
     bananaCreditsBalance: balanceAfterDebit,
   })
   } catch (unexpected) {
+    console.error(
+      `[soundboard/generate] soundboardId=${id} step=unexpected_failure`,
+      unexpected instanceof Error ? unexpected.message : unexpected,
+      unexpected instanceof Error ? unexpected.stack : ""
+    )
     if (creditsDebited > 0) {
       await creditBananaCredits(user.id, creditsDebited).catch((refundErr) => {
         console.error("[soundboard/generate] credit refund failed (unexpected):", refundErr)

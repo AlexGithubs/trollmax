@@ -6,7 +6,7 @@ import { isLikelyUpstreamRateLimit, notifyOpsRateLimitEvent } from "@/lib/ops/ra
 const UPSTREAM_BUSY_MESSAGE =
   "Our AI providers are temporarily at capacity (rate limit). Please wait a few minutes and try again."
 
-/** Log full error server-side; return a stable reference for support tickets. */
+/** Log full error server-side (Vercel / Node stdout — not the browser console). */
 export function logGenerationFailure(
   scope: string,
   err: unknown,
@@ -19,7 +19,13 @@ export function logGenerationFailure(
           .map(([k, v]) => `${k}=${v}`)
           .join(" ")}`
       : ""
-  console.error(`[${scope}] ref=${ref}${suffix}`, err)
+  const head = `[${scope}] ref=${ref}${suffix}`
+  if (err instanceof Error) {
+    console.error(`${head} message=${err.message}`)
+    if (err.stack) console.error(`${head} stack:\n${err.stack}`)
+  } else {
+    console.error(`${head} error=${String(err)}`)
+  }
   return ref
 }
 
