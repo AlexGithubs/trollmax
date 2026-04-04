@@ -115,15 +115,22 @@ async def compose_video(
         if body.talkingVideoUrl:
             talking_video_path = os.path.join(tmpdir, "talking.mp4")
 
-        async with httpx.AsyncClient() as client:
-            r = await client.get(body.audioUrl, follow_redirects=True)
-            r.raise_for_status()
+        # Use a long timeout — D-ID talking-head MP4s can be 10-50 MB and take >30s on Modal cold start.
+        async with httpx.AsyncClient(timeout=httpx.Timeout(180.0)) as client:
+            try:
+                r = await client.get(body.audioUrl, follow_redirects=True)
+                r.raise_for_status()
+            except Exception as exc:
+                raise HTTPException(status_code=500, detail=f"Audio download failed: {exc}")
             with open(audio_path, "wb") as f:
                 f.write(r.content)
 
             if talking_video_path:
-                r2 = await client.get(body.talkingVideoUrl, follow_redirects=True)
-                r2.raise_for_status()
+                try:
+                    r2 = await client.get(body.talkingVideoUrl, follow_redirects=True)
+                    r2.raise_for_status()
+                except Exception as exc:
+                    raise HTTPException(status_code=500, detail=f"Talking-video download failed: {exc}")
                 with open(talking_video_path, "wb") as f:
                     f.write(r2.content)
 
@@ -153,140 +160,92 @@ async def compose_video(
             if is_half_layout:
                 bg_color = BG_COLORS.get(body.backgroundType or "", BG_COLORS["default"])
 
+                # Audio input index is 2 (0=talking, 1=background, 2=audio).
+                _half_audio_fc = _build_half_audio_volume(vol, audio_input_idx=2)
                 if background_clip:
                     compose_mode = "talking-half-gameplay"
                     ffmpeg_cmd = [
-                        "ffmpeg",
-                        "-y",
-                        "-i",
-                        talking_video_path,
-                        "-stream_loop",
-                        "-1",
-                        "-i",
-                        background_clip,
-                        "-i",
-                        audio_path,
+                        "ffmpeg", "-y",
+                        "-i", talking_video_path,
+                        "-stream_loop", "-1", "-i", background_clip,
+                        "-i", audio_path,
                         "-filter_complex",
-                        _build_talking_half_filter_complex(body.captions, caption_paths),
-                        "-map",
-                        "[v]",
-                        "-map",
-                        "2:a",
-                        "-c:v",
-                        "libx264",
-                        "-r",
-                        "24",
-                        "-preset",
-                        "veryfast",
-                        "-crf",
-                        "25",
-                        *(
-                            ["-filter:a", f"volume={vol}"]
-                            if abs(vol - 1.0) > 1e-6
-                            else []
-                        ),
-                        "-c:a",
-                        "aac",
-                        "-b:a",
-                        "128k",
-                        "-movflags",
-                        "+faststart",
+                        _build_talking_half_filter_complex(body.captions, caption_paths)
+                        + _half_audio_fc[0],
+                        "-map", "[v]",
+                        "-map", _half_audio_fc[1],
+                        "-c:v", "libx264",
+                        "-r", "24",
+                        "-preset", "veryfast",
+                        "-crf", "25",
+                        "-c:a", "aac",
+                        "-b:a", "128k",
+                        "-movflags", "+faststart",
                         "-shortest",
                         output_path,
                     ]
                 else:
                     compose_mode = "talking-half-solid"
                     ffmpeg_cmd = [
-                        "ffmpeg",
-                        "-y",
-                        "-i",
-                        talking_video_path,
-                        "-f",
-                        "lavfi",
-                        "-i",
-                        f"color=c={bg_color}:s=1080x960:r=30",
-                        "-i",
-                        audio_path,
+                        "ffmpeg", "-y",
+                        "-i", talking_video_path,
+                        "-f", "lavfi", "-i", f"color=c={bg_color}:s=1080x960:r=30",
+                        "-i", audio_path,
                         "-filter_complex",
-                        _build_talking_half_filter_complex(body.captions, caption_paths),
-                        "-map",
-                        "[v]",
-                        "-map",
-                        "2:a",
-                        "-c:v",
-                        "libx264",
-                        "-r",
-                        "24",
-                        "-preset",
-                        "veryfast",
-                        "-crf",
-                        "25",
-                        *(
-                            ["-filter:a", f"volume={vol}"]
-                            if abs(vol - 1.0) > 1e-6
-                            else []
-                        ),
-                        "-c:a",
-                        "aac",
-                        "-b:a",
-                        "128k",
-                        "-movflags",
-                        "+faststart",
+                        _build_talking_half_filter_complex(body.captions, caption_paths)
+                        + _half_audio_fc[0],
+                        "-map", "[v]",
+                        "-map", _half_audio_fc[1],
+                        "-c:v", "libx264",
+                        "-r", "24",
+                        "-preset", "veryfast",
+                        "-crf", "25",
+                        "-c:a", "aac",
+                        "-b:a", "128k",
+                        "-movflags", "+faststart",
                         "-shortest",
                         output_path,
                     ]
             else:
                 compose_mode = "talking-full"
-                # Default to full-screen: talking head takes over the full frame.
+                # Audio input index is 1 (0=talking video, 1=audio).
+                _full_audio_fc = _build_half_audio_volume(vol, audio_input_idx=1)
+                # Full-screen: talking head takes over the full frame.
                 ffmpeg_cmd = [
-                    "ffmpeg",
-                    "-y",
-                    "-i",
-                    talking_video_path,
-                    "-i",
-                    audio_path,
+                    "ffmpeg", "-y",
+                    "-i", talking_video_path,
+                    "-i", audio_path,
                     "-filter_complex",
                     _build_video_filter_complex(
                         body.captions, caption_paths, fit_contain=True, captions_bottom=True
-                    ),
-                    "-map",
-                    "[v]",
-                    "-map",
-                    "1:a",
-                    "-c:v",
-                    "libx264",
-                    "-preset",
-                    "fast",
-                    "-crf",
-                    "23",
-                    *(
-                        ["-filter:a", f"volume={vol}"] if abs(vol - 1.0) > 1e-6 else []
-                    ),
-                    "-c:a",
-                    "aac",
-                    "-b:a",
-                    "128k",
-                    "-movflags",
-                    "+faststart",
+                    ) + _full_audio_fc[0],
+                    "-map", "[v]",
+                    "-map", _full_audio_fc[1],
+                    "-c:v", "libx264",
+                    "-preset", "fast",
+                    "-crf", "23",
+                    "-c:a", "aac",
+                    "-b:a", "128k",
+                    "-movflags", "+faststart",
                     "-shortest",
                     output_path,
                 ]
 
         elif background_clip:
             compose_mode = "background-gameplay"
+            _bg_audio_fc = _build_half_audio_volume(vol, audio_input_idx=1)
             ffmpeg_cmd = [
                 "ffmpeg", "-y",
                 "-stream_loop", "-1", "-i", background_clip,
                 "-i", audio_path,
-                "-filter_complex", _build_video_filter_complex(
-                    body.captions, caption_paths, fit_contain=False
-                ),
+                "-filter_complex",
+                _build_video_filter_complex(body.captions, caption_paths, fit_contain=False)
+                + _bg_audio_fc[0],
                 "-map", "[v]",
-                "-map", "1:a",
+                "-map", _bg_audio_fc[1],
                 "-c:v", "libx264",
                 "-preset", "fast",
                 "-crf", "23",
-                *(["-filter:a", f"volume={vol}"] if abs(vol - 1.0) > 1e-6 else []),
                 "-c:a", "aac",
                 "-b:a", "128k",
                 "-movflags", "+faststart",
@@ -296,19 +255,19 @@ async def compose_video(
         else:
             compose_mode = "solid-color"
             bg_color = BG_COLORS.get(body.backgroundType or "", BG_COLORS["default"])
+            _solid_audio_fc = _build_half_audio_volume(vol, audio_input_idx=1)
             ffmpeg_cmd = [
                 "ffmpeg", "-y",
                 "-f", "lavfi", "-i", f"color=c={bg_color}:s=1080x1920:r=30",
                 "-i", audio_path,
-                "-filter_complex", _build_color_filter_complex(
-                    bg_color, body.captions, caption_paths
-                ),
+                "-filter_complex",
+                _build_color_filter_complex(bg_color, body.captions, caption_paths)
+                + _solid_audio_fc[0],
                 "-map", "[v]",
-                "-map", "1:a",
+                "-map", _solid_audio_fc[1],
                 "-c:v", "libx264",
                 "-preset", "fast",
                 "-crf", "28",
-                *(["-filter:a", f"volume={vol}"] if abs(vol - 1.0) > 1e-6 else []),
                 "-c:a", "aac",
                 "-b:a", "128k",
                 "-movflags", "+faststart",
@@ -405,6 +364,21 @@ def _build_color_filter_complex(
 
     filters = ",".join(drawtext_parts)
     return f"color=c={bg_color}:s=1080x1920:r=30[bg];[bg]{filters}[v]"
+
+
+def _build_half_audio_volume(vol: float, audio_input_idx: int) -> tuple[str, str]:
+    """Return (filter_complex_suffix, map_ref) for audio in a filter_complex context.
+
+    When vol != 1.0 the audio is routed through a volume filter inside the
+    filter_complex graph. When vol == 1.0 the audio stream is mapped directly.
+
+    Returns a tuple of:
+      - str: the filter_complex suffix to append (leading semicolon included, or empty)
+      - str: the -map argument to use for the audio output stream
+    """
+    if abs(vol - 1.0) < 1e-6:
+        return "", f"{audio_input_idx}:a"
+    return f";[{audio_input_idx}:a]volume={vol:.6f}[outa]", "[outa]"
 
 
 def _build_talking_half_filter_complex(
