@@ -140,6 +140,8 @@ export async function POST(
       ...(synth.refText ? { refText: synth.refText } : {}),
     })
     const audioUrlForFetch = await blobUrlForExternalFetch(audioUrl)
+    /** Modal FFmpeg runs on D-ID's cloud and cannot fetch Vercel private blob URLs; reuse D-ID temp URL when available. */
+    let audioUrlForModalCompose: string = audioUrlForFetch
 
     const captionsEnabled = manifest.captionsEnabled !== false
     let captions = [] as VideoManifest["captions"]
@@ -217,6 +219,7 @@ export async function POST(
         didAuthHeader
       )
       const audioUrlForDid = await didAudioUrlFromBlobUrl(audioUrl, didAuthHeader)
+      audioUrlForModalCompose = audioUrlForDid
 
       const createRes = await fetch("https://api.d-id.com/talks", {
         method: "POST",
@@ -328,7 +331,7 @@ export async function POST(
       manifest.voicePresetId
     )
     const composeOpts = {
-      audioUrl: audioUrlForFetch,
+      audioUrl: audioUrlForModalCompose,
       backgroundVideoUrl: getBackgroundAsset(manifest.backgroundVideoId),
       captions,
       outputFormat: "mp4" as const,

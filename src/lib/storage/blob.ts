@@ -63,11 +63,21 @@ export async function blobUrlForExternalFetch(url: string): Promise<string> {
 export async function downloadBlobBuffer(
   url: string
 ): Promise<{ buffer: Buffer; contentType: string }> {
-  if (isPrivateVercelBlobUrl(url)) {
-    const result = await get(url, { access: "private", useCache: false })
-    if (!result || result.statusCode !== 200 || !result.stream) {
+  const u = url.trim()
+  if (isPrivateVercelBlobUrl(u)) {
+    let result = await get(u, { access: "private", useCache: false })
+    // 304 Not Modified returns stream: null — retry once (should not happen without ifNoneMatch).
+    if (result?.statusCode === 304) {
+      result = await get(u, { access: "private", useCache: false })
+    }
+    if (result === null) {
       throw new Error(
-        `downloadBlobBuffer: private blob unreadable (${result?.statusCode ?? "null"}) for ${url.slice(0, 80)}`
+        "Stored file was not found in Blob storage (it may have been deleted). Re-upload your voice sample or photo and try again."
+      )
+    }
+    if (result.statusCode !== 200 || !result.stream) {
+      throw new Error(
+        `downloadBlobBuffer: private blob unreadable (HTTP ${result.statusCode}) for ${u.slice(0, 120)}`
       )
     }
     const buffer = Buffer.from(await new Response(result.stream).arrayBuffer())
@@ -76,9 +86,9 @@ export async function downloadBlobBuffer(
     return { buffer, contentType }
   }
 
-  const res = await fetch(url, { redirect: "follow" })
+  const res = await fetch(u, { redirect: "follow" })
   if (!res.ok) {
-    throw new Error(`downloadBlobBuffer: fetch failed (${res.status}) for ${url.slice(0, 80)}`)
+    throw new Error(`downloadBlobBuffer: fetch failed (${res.status}) for ${u.slice(0, 120)}`)
   }
   return {
     buffer: Buffer.from(await res.arrayBuffer()),
