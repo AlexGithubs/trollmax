@@ -140,8 +140,9 @@ export async function POST(
       ...(synth.refText ? { refText: synth.refText } : {}),
     })
     const audioUrlForFetch = await blobUrlForExternalFetch(audioUrl)
-    /** Modal FFmpeg runs on D-ID's cloud and cannot fetch Vercel private blob URLs; reuse D-ID temp URL when available. */
-    let audioUrlForModalCompose: string = audioUrlForFetch
+    // Modal only needs a plain HTTPS URL — the signed Vercel URL works fine.
+    // The D-ID /audios endpoint can return s3:// URIs which httpx cannot fetch.
+    const audioUrlForModalCompose: string = audioUrlForFetch
 
     const captionsEnabled = manifest.captionsEnabled !== false
     let captions = [] as VideoManifest["captions"]
@@ -219,7 +220,6 @@ export async function POST(
         didAuthHeader
       )
       const audioUrlForDid = await didAudioUrlFromBlobUrl(audioUrl, didAuthHeader)
-      audioUrlForModalCompose = audioUrlForDid
 
       const createRes = await fetch("https://api.d-id.com/talks", {
         method: "POST",
