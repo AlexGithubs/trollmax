@@ -4,7 +4,7 @@ import { NextResponse } from "next/server"
 import { currentUser } from "@clerk/nextjs/server"
 import Replicate from "replicate"
 import { getManifestStore, getFileStore } from "@/lib/storage"
-import { blobUrlForExternalFetch } from "@/lib/storage/blob"
+import { blobUrlForExternalFetch, downloadBlobBuffer, isPrivateVercelBlobUrl } from "@/lib/storage/blob"
 import { didAudioUrlFromBlobUrl } from "@/lib/d-id/upload-audio-for-talk"
 import { didSourceUrlFromHeadshotBuffer } from "@/lib/d-id/upload-headshot-for-talk"
 import { getVideoComposer } from "@/lib/providers"
@@ -140,9 +140,13 @@ export async function POST(
       ...(synth.refText ? { refText: synth.refText } : {}),
     })
     const audioUrlForFetch = await blobUrlForExternalFetch(audioUrl)
-    // Modal only needs a plain HTTPS URL — the signed Vercel URL works fine.
-    // The D-ID /audios endpoint can return s3:// URIs which httpx cannot fetch.
-    const audioUrlForModalCompose: string = audioUrlForFetch
+    // Pre-download audio bytes when the blob is private so Modal doesn't need to fetch
+    // the blob URL itself (private Vercel blobs require auth; Modal has no token).
+    let audioBytes: Buffer | undefined
+    if (isPrivateVercelBlobUrl(audioUrl)) {
+      const { buffer } = await downloadBlobBuffer(audioUrl)
+      audioBytes = buffer
+    }
 
     const captionsEnabled = manifest.captionsEnabled !== false
     let captions = [] as VideoManifest["captions"]
@@ -331,7 +335,8 @@ export async function POST(
       manifest.voicePresetId
     )
     const composeOpts = {
-      audioUrl: audioUrlForModalCompose,
+      audioUrl: audioUrlForFetch,
+      ...(audioBytes ? { audioBytes } : {}),
       backgroundVideoUrl: getBackgroundAsset(manifest.backgroundVideoId),
       captions,
       outputFormat: "mp4" as const,

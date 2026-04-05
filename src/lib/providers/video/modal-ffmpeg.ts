@@ -48,6 +48,10 @@ export class ModalFFmpegComposer implements VideoComposer {
     const tokenSecret = process.env.MODAL_TOKEN_SECRET ?? ""
     const credentials = Buffer.from(`${tokenId}:${tokenSecret}`).toString("base64")
 
+    // When audio bytes are pre-downloaded (private blob), send them inline as base64 so
+    // Modal never needs to fetch the blob URL (private Vercel Blob → 403 from external servers).
+    const audioBase64 = opts.audioBytes ? opts.audioBytes.toString("base64") : undefined
+
     const response = await fetch(this.endpoint, {
       method: "POST",
       headers: {
@@ -55,9 +59,10 @@ export class ModalFFmpegComposer implements VideoComposer {
         Authorization: `Basic ${credentials}`,
       },
       body: JSON.stringify({
-        audioUrl: opts.audioUrl,
+        audioUrl: audioBase64 ? undefined : opts.audioUrl,
+        audioBase64,
         backgroundAsset,
-        backgroundType, // Backward-compatible fallback for old gradient-based requests.
+        backgroundType,
         captions: opts.captions,
         voiceVolumeMultiplier: opts.voiceVolumeMultiplier ?? 1.0,
         talkingVideoUrl: opts.talkingVideoUrl,

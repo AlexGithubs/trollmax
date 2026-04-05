@@ -68,7 +68,8 @@ class Caption(BaseModel):
 
 
 class ComposeRequest(BaseModel):
-    audioUrl: str
+    audioUrl: Optional[str] = None
+    audioBase64: Optional[str] = None  # base64-encoded audio bytes (used when blob is private)
     backgroundAsset: Optional[str] = None
     backgroundType: Optional[str] = None
     talkingVideoUrl: Optional[str] = None
@@ -115,16 +116,26 @@ async def compose_video(
         if body.talkingVideoUrl:
             talking_video_path = os.path.join(tmpdir, "talking.mp4")
 
+        if not body.audioBase64 and not body.audioUrl:
+            raise HTTPException(status_code=400, detail="Either audioUrl or audioBase64 must be provided")
+
+        # Write audio — inline bytes take priority over URL (avoids 403 on private blobs).
+        if body.audioBase64:
+            with open(audio_path, "wb") as f:
+                f.write(base64.b64decode(body.audioBase64))
+        else:
+            # Use a long timeout — audio files can be several MB.
+            async with httpx.AsyncClient(timeout=httpx.Timeout(180.0)) as client:
+                try:
+                    r = await client.get(body.audioUrl, follow_redirects=True)
+                    r.raise_for_status()
+                except Exception as exc:
+                    raise HTTPException(status_code=500, detail=f"Audio download failed: {exc}")
+                with open(audio_path, "wb") as f:
+                    f.write(r.content)
+
         # Use a long timeout — D-ID talking-head MP4s can be 10-50 MB and take >30s on Modal cold start.
         async with httpx.AsyncClient(timeout=httpx.Timeout(180.0)) as client:
-            try:
-                r = await client.get(body.audioUrl, follow_redirects=True)
-                r.raise_for_status()
-            except Exception as exc:
-                raise HTTPException(status_code=500, detail=f"Audio download failed: {exc}")
-            with open(audio_path, "wb") as f:
-                f.write(r.content)
-
             if talking_video_path:
                 try:
                     r2 = await client.get(body.talkingVideoUrl, follow_redirects=True)

@@ -47,6 +47,9 @@ export interface CaptionsProvider {
 
 export interface VideoComposeOptions {
   audioUrl: string
+  /** Pre-downloaded audio bytes. When provided, Modal receives audio inline (base64) and never
+   * needs to fetch the blob URL — avoids 403 on private Vercel Blob stores. */
+  audioBytes?: Buffer
   backgroundVideoUrl: string
   captions: Caption[]
   outputFormat: "mp4"
