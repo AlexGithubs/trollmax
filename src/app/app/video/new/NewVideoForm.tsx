@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { useUser, useClerk } from "@clerk/nextjs"
 import Link from "next/link"
-import { TourOfferBanner } from "@/components/onboarding/TourOfferBanner"
+import { emitBananaCreditsUpdated } from "@/lib/client/banana-credits-bridge"
 import NextImage from "next/image"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -582,6 +582,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
 
       // Fire generation request but drive UI by polling status.
       let genHttpError: Error | null = null
+      let postGenBananaBalance: number | undefined
       const genPromise = fetch(`/api/video/${createdId}/generate`, { method: "POST" })
         .then(async (r) => {
           const j = await r.json().catch(() => ({}))
@@ -590,7 +591,9 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
             const msg = [o.error, o.detail].filter(Boolean).join(" — ")
             throw new Error(msg || "Generation failed")
           }
-          return j as { id?: string }
+          const o = j as { id?: string; bananaCreditsBalance?: number }
+          if (typeof o.bananaCreditsBalance === "number") postGenBananaBalance = o.bananaCreditsBalance
+          return o
         })
         .catch((e) => {
           genHttpError = e instanceof Error ? e : new Error(String(e))
@@ -634,6 +637,10 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
       }
 
       await genPromise
+      if (typeof postGenBananaBalance === "number") {
+        emitBananaCreditsUpdated(postGenBananaBalance)
+      }
+      router.refresh()
       setStage("done")
       router.push(`/app/video/${createdId}`)
     } catch (err) {
@@ -644,24 +651,26 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
 
   if (stage === "generating") {
     return (
-      <div className="mx-auto max-w-lg space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Generating Video</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Your video is being created. This may take a minute.
-          </p>
+      <div className="fixed inset-0 z-[60] flex flex-col overflow-y-auto bg-background px-4 py-6 pt-4">
+        <div className="mx-auto w-full max-w-lg flex-1 space-y-6">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Generating Video</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Your video is being created. This may take a few minutes — please keep this screen open.
+            </p>
+          </div>
+          <VideoGeneratingCard
+            progressStep={progressStep}
+            progressPct={progressPct}
+            progressDetail={progressDetail}
+            lastError={error || null}
+          />
+          {error && (
+            <p className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+              {error}
+            </p>
+          )}
         </div>
-        <VideoGeneratingCard
-          progressStep={progressStep}
-          progressPct={progressPct}
-          progressDetail={progressDetail}
-          lastError={error || null}
-        />
-        {error && (
-          <p className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-            {error}
-          </p>
-        )}
       </div>
     )
   }
@@ -670,8 +679,6 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
-      <TourOfferBanner page="/app/video/new" />
-
       <div>
         <h1 className="text-2xl font-bold tracking-tight">New Video</h1>
         <p className="mt-1 text-sm text-muted-foreground">

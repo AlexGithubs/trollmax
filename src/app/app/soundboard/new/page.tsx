@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useMemo, type MouseEvent } from "react"
 import { useRouter } from "next/navigation"
 import { useUser, useClerk } from "@clerk/nextjs"
 import { Button } from "@/components/ui/button"
-import { TourOfferBanner } from "@/components/onboarding/TourOfferBanner"
+import { emitBananaCreditsUpdated } from "@/lib/client/banana-credits-bridge"
 import { Card, CardContent } from "@/components/ui/card"
 import {
   Upload,
@@ -380,6 +380,7 @@ export default function NewSoundboardPage() {
 
       // Fire generation request but drive UI by polling status.
       let genHttpError: Error | null = null
+      let postGenBananaBalance: number | undefined
       const genPromise = fetch(`/api/soundboard/${createdId}/generate`, { method: "POST" })
         .then(async (r) => {
           const j = await r.json().catch(() => ({}))
@@ -388,7 +389,9 @@ export default function NewSoundboardPage() {
             const msg = [o.error, o.detail].filter(Boolean).join(" — ")
             throw new Error(msg || "Generation failed")
           }
-          return j as { id?: string }
+          const o = j as { id?: string; bananaCreditsBalance?: number }
+          if (typeof o.bananaCreditsBalance === "number") postGenBananaBalance = o.bananaCreditsBalance
+          return o
         })
         .catch((e) => {
           genHttpError = e instanceof Error ? e : new Error(String(e))
@@ -432,6 +435,10 @@ export default function NewSoundboardPage() {
       }
 
       await genPromise
+      if (typeof postGenBananaBalance === "number") {
+        emitBananaCreditsUpdated(postGenBananaBalance)
+      }
+      router.refresh()
       setStage("done")
       router.push(`/app/soundboard/${createdId}`)
     } catch (err) {
@@ -458,10 +465,28 @@ export default function NewSoundboardPage() {
       ? Boolean(sampleUrl)
       : Boolean(selectedPresetId && selectedPreset?.status === "active")
 
+  if (stage === "generating") {
+    return (
+      <div className="fixed inset-0 z-[60] flex flex-col overflow-y-auto bg-background px-4 py-6 pt-4">
+        <div className="mx-auto w-full max-w-lg flex-1 space-y-4">
+          {error && (
+            <p className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+              {error}
+            </p>
+          )}
+          <GeneratingCard
+            progressStep={progressStep}
+            progressPct={progressPct}
+            progressDetail={progressDetail}
+            lastError={error || null}
+          />
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="mx-auto max-w-2xl space-y-6">
-      <TourOfferBanner page="/app/soundboard/new" />
-
       <div>
         <h1 className="text-2xl font-bold tracking-tight">New Soundboard</h1>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -658,6 +683,7 @@ export default function NewSoundboardPage() {
           ) : (
             <>
               <button
+                type="button"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={busy}
                 className="flex w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border/60 py-8 text-sm text-muted-foreground hover:border-primary/50 hover:text-foreground transition-colors disabled:opacity-50"
@@ -737,24 +763,8 @@ export default function NewSoundboardPage() {
         </CardContent>
       </Card>
 
-      {stage === "generating" ? (
-        <>
-          {error && (
-            <p className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-              {error}
-            </p>
-          )}
-          <GeneratingCard
-            progressStep={progressStep}
-            progressPct={progressPct}
-            progressDetail={progressDetail}
-            lastError={error || null}
-          />
-        </>
-      ) : (
-        <>
-          {/* Step 2: Title + phrases */}
-          <Card className="border-border/60 bg-card/50">
+      {/* Step 2: Title + phrases */}
+      <Card className="border-border/60 bg-card/50">
             <CardContent className="pt-5 space-y-4">
               <p className="text-sm font-medium">2. Title &amp; phrases</p>
 
@@ -981,8 +991,6 @@ export default function NewSoundboardPage() {
               {generationCost}
             </span>
           </Button>
-        </>
-      )}
     </div>
   )
 }

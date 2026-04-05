@@ -219,8 +219,9 @@ export const TOUR_STEPS: TourStep[] = [
     id: "tour-complete",
     page: null,
     targetSelector: null,
-    title: "You're all set! 🎉",
-    content: "That's the full TROLLMAX experience. Go create something unhinged. Restart this tour anytime from the sidebar.",
+    title: "You're all set!",
+    content:
+      "That's the full TROLLMAX experience. Go create something unhinged. Tap the ? icon in the top bar (phone) or “Tour guide” in the sidebar (desktop) anytime to run this again.",
     placement: "center",
     navigateTo: "/app",
     navigateLabel: "Go to Dashboard",

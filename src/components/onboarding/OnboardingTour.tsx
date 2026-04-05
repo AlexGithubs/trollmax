@@ -149,7 +149,7 @@ function computeTooltipPosition(
 export function OnboardingTour() {
   const pathname = usePathname()
   const router = useRouter()
-  const { isSignedIn, isLoaded } = useUser()
+  const { isLoaded } = useUser()
 
   const [state, setState] = useState<TourState>({ active: false, step: 0 })
   const [mounted, setMounted] = useState(false)
@@ -170,37 +170,27 @@ export function OnboardingTour() {
     setMounted(true)
   }, [])
 
-  // ── Auth-aware initialisation ───────────────────────────────────────────────
-  // Runs once auth state is determined. Only auto-starts the tour for signed-in
-  // users landing on /app for the first time. Every other path (guests on form
-  // pages, direct links, post-signup returns) stays inactive — the opt-in
-  // TourOfferBanner handles guests on form pages separately.
+  // ── First visit: offer tour from any /app route (signed in or not) ───────────
   useEffect(() => {
     if (!mounted || !isLoaded) return
 
     const raw = localStorage.getItem(STORAGE_KEY)
 
     if (raw !== null) {
-      // Returning visitor — restore saved state (may be mid-tour or dismissed)
       try {
         setState(JSON.parse(raw) as TourState)
       } catch {
-        // corrupted — leave inactive
+        /* corrupted */
       }
       return
     }
 
-    // Truly first visit (no key in localStorage)
-    if (pathname === "/app" && isSignedIn === true) {
-      // Signed-in user visiting the dashboard for the first time → full tour
+    if (pathname?.startsWith("/app")) {
       const ns: TourState = { active: true, step: 0 }
       setState(ns)
       saveState(ns)
     }
-    // All other cases (guest, direct link to form, post-signup return, etc.)
-    // stay inactive. TourOfferBanner handles guests on form pages.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mounted, isLoaded])
+  }, [mounted, isLoaded, pathname])
 
   // ── Listen for banner-triggered tour starts ─────────────────────────────────
   useEffect(() => {
@@ -363,7 +353,7 @@ export function OnboardingTour() {
     // and let the pending-step effect commit the state change on arrival.
     if (prevStep && prevStep.page !== null && prevStep.page !== pathname) {
       pendingStepRef.current = prevIdx
-      router.push(prevStep.page)
+      router.push(prevStep.page, { scroll: false })
       return
     }
     const ns: TourState = { active: true, step: prevIdx }
@@ -388,13 +378,13 @@ export function OnboardingTour() {
       return
     }
     pendingStepRef.current = nextIdx
-    router.push(href)
+    router.push(href, { scroll: false })
   }
 
   // Used by the wrong-page transition card's "Take me there" button: we're
   // already on the correct step — we just need to get to the right page.
   function justNavigate(href: string) {
-    router.push(href)
+    router.push(href, { scroll: false })
   }
 
   if (!mounted || !state.active || !currentStep) return null
@@ -420,32 +410,34 @@ export function OnboardingTour() {
 
 // ─── Restart button ───────────────────────────────────────────────────────────
 
-export function TourRestartButton() {
-  const router = useRouter()
-  const { isSignedIn } = useUser()
-
+export function TourRestartButton({
+  className = "",
+  iconOnly = false,
+}: {
+  className?: string
+  /** Compact control for mobile header (iPhone) */
+  iconOnly?: boolean
+}) {
   function handleRestart() {
     const ns: TourState = { active: true, step: 0 }
     saveState(ns)
-    if (isSignedIn) {
-      // Signed-in users go to the dashboard where the full tour starts
-      router.push("/app")
-      router.refresh()
-    } else {
-      // Guests stay on the current page — dispatch the event so OnboardingTour
-      // picks up the new state without a navigation that requires auth
-      window.dispatchEvent(new CustomEvent("trollmax:start-tour", { detail: ns }))
-    }
+    window.dispatchEvent(new CustomEvent("trollmax:start-tour", { detail: ns }))
   }
 
   return (
     <button
+      type="button"
       onClick={handleRestart}
-      title="Restart onboarding tour"
-      className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors rounded-md px-3 py-1.5 hover:bg-secondary w-full"
+      title="Start or restart the app tour"
+      aria-label="Tour guide"
+      className={
+        iconOnly
+          ? `inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border/60 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground ${className}`
+          : `flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground ${className}`
+      }
     >
-      <HelpCircle className="h-3.5 w-3.5 shrink-0" />
-      <span>Tour guide</span>
+      <HelpCircle className="h-4 w-4 shrink-0" />
+      {!iconOnly && <span>Tour guide</span>}
     </button>
   )
 }

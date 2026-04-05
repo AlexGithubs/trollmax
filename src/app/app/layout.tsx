@@ -1,10 +1,11 @@
 import Link from "next/link"
 import { AppMobileBottomNav } from "@/components/layout/AppMobileBottomNav"
 import { AppUserButton } from "@/components/layout/AppUserButton"
+import { BananaCreditsClient } from "@/components/billing/BananaCreditsClient"
 import { OnboardingTour, TourRestartButton } from "@/components/onboarding/OnboardingTour"
-import { SignInBalanceLink, SignInMobileButton, SignInSidebarButton } from "@/components/layout/SignInLink"
+import { SignInMobileButton, SignInSidebarButton } from "@/components/layout/SignInLink"
 import { currentUser } from "@clerk/nextjs/server"
-import { Zap, Mic2, Video, LayoutDashboard, Coins } from "lucide-react"
+import { Zap, Mic2, Video, LayoutDashboard } from "lucide-react"
 import { getUserEntitlements } from "@/lib/billing/entitlements"
 import { currencyIconAlt, currencyIconSrc } from "@/lib/billing/currency-display"
 
@@ -24,32 +25,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <p className="text-[10px] font-semibold uppercase tracking-wide text-primary/80">
             Banana credits
           </p>
-          {user ? (
-            <>
-              <p className="mt-1 flex items-center gap-1.5 text-lg font-bold text-foreground">
-                {ent?.bananaCreditsBalance ?? 5}
-                <img src={currencyIconSrc()} alt={currencyIconAlt()} className="h-7 w-7 object-contain" />
-              </p>
-              <p className="mt-1 text-[11px] text-muted-foreground">
-                Spend banana credits to generate videos and soundboards
-              </p>
-              <Link
-                data-tour="credits-link"
-                href="/pricing"
-                className="mt-2 flex items-center gap-1.5 text-[11px] font-medium text-primary/90 underline-offset-2 hover:text-primary hover:underline"
-              >
-                <Coins className="h-3 w-3 shrink-0 opacity-80" />
-                Get more for your balance
-              </Link>
-            </>
-          ) : (
-            <>
-              <p className="mt-1 text-[11px] text-muted-foreground">
-                New accounts start with 5 free banana credits.
-              </p>
-              <SignInBalanceLink />
-            </>
-          )}
+          <BananaCreditsClient
+            variant="sidebar"
+            signedIn={Boolean(user)}
+            initialBalance={ent?.bananaCreditsBalance ?? 5}
+          />
         </div>
         <nav className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-3">
           {user && <NavLink href="/app" icon={LayoutDashboard} label="Dashboard" />}
@@ -77,17 +57,15 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </Link>
           <div className="flex shrink-0 items-center gap-2">
             {user ? (
-              <Link
-                data-tour="credits-widget"
-                href="/pricing"
-                className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-2 py-1 text-xs font-semibold hover:bg-primary/20 transition-colors"
-              >
-                {ent?.bananaCreditsBalance ?? 5}
-                <img src={currencyIconSrc()} alt={currencyIconAlt()} className="h-6 w-6 object-contain" />
-              </Link>
+              <BananaCreditsClient
+                variant="mobile"
+                signedIn
+                initialBalance={ent?.bananaCreditsBalance ?? 5}
+              />
             ) : (
               <SignInMobileButton />
             )}
+            <TourRestartButton className="lg:hidden" iconOnly />
             <AppUserButton />
           </div>
         </header>
@@ -131,6 +109,7 @@ function NavLink({
   return (
     <Link
       href={href}
+      scroll={false}
       data-tour={tourId}
       className="flex items-center gap-2.5 rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
     >

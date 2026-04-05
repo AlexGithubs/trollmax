@@ -31,6 +31,7 @@ export function AppMobileBottomNav({ showDashboard }: { showDashboard: boolean }
       {showDashboard && (
         <Link
           href="/app"
+          scroll={false}
           className={navItemClass(dashboardActive)}
           aria-current={dashboardActive ? "page" : undefined}
         >
@@ -40,6 +41,7 @@ export function AppMobileBottomNav({ showDashboard }: { showDashboard: boolean }
       )}
       <Link
         href="/app/video"
+        scroll={false}
         data-tour="nav-video"
         className={navItemClass(videoActive)}
         aria-current={videoActive ? "page" : undefined}
@@ -49,6 +51,7 @@ export function AppMobileBottomNav({ showDashboard }: { showDashboard: boolean }
       </Link>
       <Link
         href="/app/soundboard"
+        scroll={false}
         data-tour="nav-soundboard"
         className={navItemClass(soundboardActive)}
         aria-current={soundboardActive ? "page" : undefined}
