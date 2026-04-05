@@ -10,7 +10,9 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "download-previews": "node --env-file=.env.local scripts/download-voice-previews.mjs"
+    "download-previews": "node --env-file=.env.local scripts/download-voice-previews.mjs",
+    "test:e2e": "playwright test",
+    "test:e2e:prod": "playwright test tests/production.spec.ts"
   },
   "dependencies": {
     "@clerk/backend": "3.2.3",

@@ -504,7 +504,7 @@ export default function NewSoundboardPage() {
       <Card data-tour="sb-voice-source" className="border-border/60 bg-card/50">
         <CardContent className="pt-5 space-y-3">
           <p className="text-sm font-medium">1. Voice</p>
-          <div className="flex rounded-lg border border-border/50 p-0.5 bg-secondary/20">
+          <div className="flex flex-col gap-1 rounded-lg border border-border/50 bg-secondary/20 p-1 sm:flex-row sm:gap-0 sm:p-0.5">
             <button
               type="button"
               disabled={busy}
@@ -513,13 +513,13 @@ export default function NewSoundboardPage() {
                 setSelectedPresetId(null)
               }}
               className={[
-                "flex flex-1 items-center justify-center gap-1.5 rounded-md py-2 text-xs font-medium transition-colors",
+                "flex w-full items-center justify-start gap-2.5 rounded-md px-3 py-2.5 text-sm font-medium transition-colors sm:flex-1 sm:justify-center sm:gap-1.5 sm:py-2 sm:text-xs",
                 voiceMode === "upload"
                   ? "bg-card text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground",
               ].join(" ")}
             >
-              <Upload className="h-3.5 w-3.5" />
+              <Upload className="h-4 w-4 shrink-0 sm:h-3.5 sm:w-3.5" />
               Upload audio
             </button>
             <button
@@ -536,13 +536,13 @@ export default function NewSoundboardPage() {
                 if (fileInputRef.current) fileInputRef.current.value = ""
               }}
               className={[
-                "flex flex-1 items-center justify-center gap-1.5 rounded-md py-2 text-xs font-medium transition-colors",
+                "flex w-full items-center justify-start gap-2.5 rounded-md px-3 py-2.5 text-sm font-medium transition-colors sm:flex-1 sm:justify-center sm:gap-1.5 sm:py-2 sm:text-xs",
                 voiceMode === "preset"
                   ? "bg-card text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground",
               ].join(" ")}
             >
-              <Sparkles className="h-3.5 w-3.5" />
+              <Sparkles className="h-4 w-4 shrink-0 sm:h-3.5 sm:w-3.5" />
               Preset voices
             </button>
           </div>

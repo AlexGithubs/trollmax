@@ -766,21 +766,21 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
         <CardContent className="pt-5 space-y-3">
           <p className="text-sm font-medium">2. Voice</p>
 
-          {/* Three-way tab bar */}
-          <div className="flex rounded-lg border border-border/50 p-0.5 bg-secondary/20">
+          {/* Three-way tab bar: stacked on narrow screens so labels are not crushed */}
+          <div className="flex flex-col gap-1 rounded-lg border border-border/50 bg-secondary/20 p-1 sm:flex-row sm:gap-0 sm:p-0.5">
             <button
               type="button"
               disabled={!canUsePresets}
               onClick={() => setVoiceKind("preset")}
               className={[
-                "flex flex-1 items-center justify-center gap-1.5 rounded-md py-2 text-xs font-medium transition-colors",
+                "flex w-full items-center justify-start gap-2.5 rounded-md px-3 py-2.5 text-sm font-medium transition-colors sm:flex-1 sm:justify-center sm:gap-1.5 sm:py-2 sm:text-xs",
                 voiceKind === "preset"
                   ? "bg-card text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground",
                 !canUsePresets ? "opacity-40 pointer-events-none" : "",
               ].join(" ")}
             >
-              <Sparkles className="h-3.5 w-3.5" />
+              <Sparkles className="h-4 w-4 shrink-0 sm:h-3.5 sm:w-3.5" />
               Preset voices
             </button>
             <button
@@ -788,27 +788,27 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
               disabled={!canUseBoards}
               onClick={() => setVoiceKind("board")}
               className={[
-                "flex flex-1 items-center justify-center gap-1.5 rounded-md py-2 text-xs font-medium transition-colors",
+                "flex w-full items-center justify-start gap-2.5 rounded-md px-3 py-2.5 text-sm font-medium transition-colors sm:flex-1 sm:justify-center sm:gap-1.5 sm:py-2 sm:text-xs",
                 voiceKind === "board"
                   ? "bg-card text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground",
                 !canUseBoards ? "opacity-40 pointer-events-none" : "",
               ].join(" ")}
             >
-              <Mic2 className="h-3.5 w-3.5" />
+              <Mic2 className="h-4 w-4 shrink-0 sm:h-3.5 sm:w-3.5" />
               My soundboards
             </button>
             <button
               type="button"
               onClick={() => setVoiceKind("upload")}
               className={[
-                "flex flex-1 items-center justify-center gap-1.5 rounded-md py-2 text-xs font-medium transition-colors",
+                "flex w-full items-center justify-start gap-2.5 rounded-md px-3 py-2.5 text-sm font-medium transition-colors sm:flex-1 sm:justify-center sm:gap-1.5 sm:py-2 sm:text-xs",
                 voiceKind === "upload"
                   ? "bg-card text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground",
               ].join(" ")}
             >
-              <Upload className="h-3.5 w-3.5" />
+              <Upload className="h-4 w-4 shrink-0 sm:h-3.5 sm:w-3.5" />
               Upload voice
             </button>
           </div>
