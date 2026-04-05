@@ -10,6 +10,7 @@
  */
 import { nanoid } from "nanoid"
 import { getFileStore } from "@/lib/storage"
+import { extractOgPosterJpegFromMp4 } from "@/lib/media/extract-poster-from-mp4"
 import type {
   VideoComposer,
   VideoComposeOptions,
@@ -104,7 +105,21 @@ export class ModalFFmpegComposer implements VideoComposer {
     const fileStore = getFileStore()
     const { url: videoUrl } = await fileStore.upload(`videos/${jobId}.mp4`, buf, "video/mp4")
 
-    return { jobId, status: "complete", videoUrl }
+    let thumbnailUrl: string | undefined
+    try {
+      const jpeg = await extractOgPosterJpegFromMp4(buf)
+      const { url } = await fileStore.upload(
+        `thumbnails/${jobId}.jpg`,
+        jpeg,
+        "image/jpeg",
+        "public"
+      )
+      thumbnailUrl = url
+    } catch (thumbErr) {
+      console.error("[ModalFFmpegComposer] thumbnail extraction failed:", thumbErr)
+    }
+
+    return { jobId, status: "complete", videoUrl, thumbnailUrl }
   }
 
   // Modal is synchronous from Next.js perspective — compose() returns complete directly.

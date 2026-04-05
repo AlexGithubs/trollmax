@@ -382,6 +382,7 @@ export async function POST(
       captions,
       jobId: composeResult.jobId,
       videoUrl: composeResult.videoUrl,
+      ...(composeResult.thumbnailUrl ? { thumbnailUrl: composeResult.thumbnailUrl } : {}),
       headshotImageUrl: "",  // blob was deleted above; clear URL from manifest
       progressStep: "Complete",
       progressPct: 100,

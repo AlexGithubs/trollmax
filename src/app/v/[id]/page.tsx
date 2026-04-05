@@ -3,9 +3,13 @@ import { SiteFooter } from "@/components/layout/SiteFooter"
 import { getManifestStore } from "@/lib/storage"
 import type { VideoManifest } from "@/lib/manifests/types"
 import { VideoPlayer } from "@/components/video/VideoPlayer"
-import { VideoShareLink } from "@/components/video/VideoShareLink"
+import { ShareMenu } from "@/components/share/ShareMenu"
 import { Video, ArrowRight } from "lucide-react"
 import Link from "next/link"
+import { getSiteBaseUrl } from "@/lib/site-url"
+
+const SHARE_BLURB =
+  "Check out what I made on Trollmax.xyz! Watch this AI-generated video on TROLLMAX."
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -14,19 +18,28 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
   if (!raw) return { title: "Video not found — TROLLMAX" }
   const m = JSON.parse(raw) as VideoManifest
   if (m.status !== "complete" || !m.isPublic) return { title: "Video not found — TROLLMAX" }
+
+  const base = getSiteBaseUrl() ?? ""
+  const canonical = base ? `${base}/v/${id}` : `/v/${id}`
+  const ogImage = m.thumbnailUrl
+    ? [{ url: m.thumbnailUrl, width: 1200, height: 630, alt: m.title }]
+    : [{ url: "/opengraph-image", width: 1200, height: 630, alt: "TROLLMAX" }]
+
   return {
-    title: `${m.title} — TROLLMAX`,
-    description: `Watch this AI-generated brainrot video on TROLLMAX.`,
+    title: `${m.title} · Trollmax`,
+    description: SHARE_BLURB,
     openGraph: {
-      title: `${m.title} — TROLLMAX`,
-      description: `Watch this AI-generated brainrot video on TROLLMAX.`,
-      images: [{ url: "/og-image.png", width: 1200, height: 630, alt: "TROLLMAX" }],
+      title: `${m.title} · Trollmax`,
+      description: SHARE_BLURB,
+      url: canonical,
+      type: "website",
+      images: ogImage,
     },
     twitter: {
       card: "summary_large_image",
-      title: `${m.title} — TROLLMAX`,
-      description: `Watch this AI-generated brainrot video on TROLLMAX.`,
-      images: ["/og-image.png"],
+      title: `${m.title} · Trollmax`,
+      description: SHARE_BLURB,
+      images: ogImage.map((i) => i.url),
     },
   }
 }
@@ -40,9 +53,7 @@ export default async function VideoSharePage({
   const store = getManifestStore()
   const raw = await store.get(`video:${id}`)
 
-  const baseUrl =
-    process.env.NEXT_PUBLIC_APP_URL ??
-    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000")
+  const baseUrl = getSiteBaseUrl() ?? "http://localhost:3000"
   const shareUrl = `${baseUrl}/v/${id}`
 
   if (!raw) {
@@ -60,11 +71,16 @@ export default async function VideoSharePage({
       <SiteHeader />
       <main className="flex-1 px-4 py-10">
         <div className="mx-auto max-w-sm space-y-8">
-          <div className="space-y-1">
-            <h1 className="text-2xl font-bold tracking-tight">{manifest.title}</h1>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 space-y-1">
+              <h1 className="text-2xl font-bold tracking-tight">{manifest.title}</h1>
+            </div>
+            <ShareMenu
+              shareUrl={shareUrl}
+              kind="video"
+              className="shrink-0"
+            />
           </div>
-
-          <VideoShareLink shareUrl={shareUrl} />
 
           <VideoPlayer videoUrl={manifest.videoUrl} videoId={id} />
 

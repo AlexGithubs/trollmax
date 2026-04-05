@@ -6,8 +6,9 @@ import { Button } from "@/components/ui/button"
 import { ArrowLeft, Info } from "lucide-react"
 import type { SoundboardManifest } from "@/lib/manifests/types"
 import { SoundboardPlayer } from "@/components/soundboard/SoundboardPlayer"
-import { ShareLinkCopy } from "@/components/soundboard/ShareLinkCopy"
+import { ShareMenu } from "@/components/share/ShareMenu"
 import { DeleteBoardButton } from "@/components/soundboard/DeleteBoardButton"
+import { getSiteBaseUrl } from "@/lib/site-url"
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -30,9 +31,7 @@ export default async function ManageSoundboardPage({
   const manifest = JSON.parse(raw) as SoundboardManifest
   if (manifest.ownerId !== user.id) notFound()
 
-  const baseUrl =
-    process.env.NEXT_PUBLIC_APP_URL ??
-    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000")
+  const baseUrl = getSiteBaseUrl() ?? "http://localhost:3000"
   const shareUrl = `${baseUrl}/s/${id}`
 
   return (
@@ -47,6 +46,7 @@ export default async function ManageSoundboardPage({
           <h1 className="truncate text-xl font-bold tracking-tight">{manifest.title}</h1>
           <p className="text-xs text-muted-foreground">{manifest.speakerLabel}</p>
         </div>
+        <ShareMenu shareUrl={shareUrl} kind="soundboard" className="shrink-0" />
       </div>
 
       <details className="rounded-xl border border-border/50 bg-card/40 px-4 py-3">
@@ -82,8 +82,6 @@ export default async function ManageSoundboardPage({
           </p>
         </div>
       </details>
-
-      <ShareLinkCopy shareUrl={shareUrl} />
 
       {manifest.clips.length > 0 ? (
         <SoundboardPlayer

@@ -5,7 +5,8 @@ import Link from "next/link"
 import { getManifestStore } from "@/lib/storage"
 import type { SoundboardManifest } from "@/lib/manifests/types"
 import { SoundboardPlayer } from "@/components/soundboard/SoundboardPlayer"
-import { ShareLinkCopy } from "@/components/soundboard/ShareLinkCopy"
+import { ShareMenu } from "@/components/share/ShareMenu"
+import { getSiteBaseUrl } from "@/lib/site-url"
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -14,19 +15,27 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
   if (!raw) return { title: "Soundboard not found — TROLLMAX" }
   const m = JSON.parse(raw) as SoundboardManifest
   if (!m.isPublic) return { title: "Soundboard not found — TROLLMAX" }
+
+  const base = getSiteBaseUrl() ?? ""
+  const canonical = base ? `${base}/s/${id}` : `/s/${id}`
+  const desc = `Check out what I made on Trollmax.xyz! ${m.speakerLabel}'s voice · ${m.clips.length} clips on TROLLMAX.`
+  const ogImage = [{ url: "/opengraph-image", width: 1200, height: 630, alt: "TROLLMAX" }]
+
   return {
-    title: `${m.title} — TROLLMAX`,
-    description: `${m.speakerLabel}'s voice soundboard. ${m.clips.length} clips.`,
+    title: `${m.title} · Trollmax`,
+    description: desc,
     openGraph: {
-      title: `${m.title} — TROLLMAX`,
-      description: `Play ${m.speakerLabel}'s soundboard on TROLLMAX`,
-      images: [{ url: "/og-image.png", width: 1200, height: 630, alt: "TROLLMAX" }],
+      title: `${m.title} · Trollmax`,
+      description: desc,
+      url: canonical,
+      type: "website",
+      images: ogImage,
     },
     twitter: {
       card: "summary_large_image",
-      title: `${m.title} — TROLLMAX`,
-      description: `Play ${m.speakerLabel}'s soundboard on TROLLMAX`,
-      images: ["/og-image.png"],
+      title: `${m.title} · Trollmax`,
+      description: desc,
+      images: ogImage.map((i) => i.url),
     },
   }
 }
@@ -40,9 +49,7 @@ export default async function SoundboardSharePage({
   const store = getManifestStore()
   const raw = await store.get(`soundboard:${id}`)
 
-  const baseUrl =
-    process.env.NEXT_PUBLIC_APP_URL ??
-    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000")
+  const baseUrl = getSiteBaseUrl() ?? "http://localhost:3000"
   const shareUrl = `${baseUrl}/s/${id}`
 
   if (!raw) {
@@ -105,16 +112,16 @@ export default async function SoundboardSharePage({
       <main className="flex-1 px-4 py-10">
         <div className="mx-auto max-w-2xl space-y-8">
           {/* Header */}
-          <div className="space-y-1">
-            <h1 className="text-3xl font-bold tracking-tight">{manifest.title}</h1>
-            <p className="text-sm text-muted-foreground">
-              <span className="font-medium text-foreground">{manifest.speakerLabel}</span>
-              &apos;s voice · {manifest.clips.length} clip{manifest.clips.length !== 1 ? "s" : ""}
-            </p>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 space-y-1">
+              <h1 className="text-3xl font-bold tracking-tight">{manifest.title}</h1>
+              <p className="text-sm text-muted-foreground">
+                <span className="font-medium text-foreground">{manifest.speakerLabel}</span>
+                &apos;s voice · {manifest.clips.length} clip{manifest.clips.length !== 1 ? "s" : ""}
+              </p>
+            </div>
+            <ShareMenu shareUrl={shareUrl} kind="soundboard" className="shrink-0" />
           </div>
-
-          {/* Share */}
-          <ShareLinkCopy shareUrl={shareUrl} />
 
           {/* Player */}
           {manifest.clips.length > 0 ? (

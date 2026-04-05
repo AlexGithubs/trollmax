@@ -206,13 +206,13 @@ test("/s/[id] — seeded board renders title + clip buttons", async ({ request, 
   await page.screenshot({ path: "tests/screenshots/share-soundboard-live.png", fullPage: true })
 })
 
-test("/s/[id] — share link anchor is shown on board page", async ({ request, page }) => {
+test("/s/[id] — Share control is shown on board page", async ({ request, page }) => {
   const seedRes = await request.post(`${BASE}/api/test/seed-soundboard`)
   expect(seedRes.status()).toBe(200)
   const { id } = await seedRes.json()
 
   await page.goto(`${BASE}/s/${id}`)
-  await expect(page.locator(`a[href*="/s/${id}"]`)).toBeVisible()
+  await expect(page.getByRole("button", { name: /share/i })).toBeVisible()
   await page.screenshot({ path: "tests/screenshots/share-copy-link.png" })
 })
 

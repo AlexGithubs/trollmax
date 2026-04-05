@@ -2,6 +2,7 @@ import type { Metadata } from "next"
 import { Geist, Geist_Mono } from "next/font/google"
 import { ClerkProvider } from "@clerk/nextjs"
 import { clerkAppearance } from "@/lib/clerk-appearance"
+import { getMetadataBase } from "@/lib/site-url"
 import "./globals.css"
 
 const geistSans = Geist({
@@ -15,6 +16,7 @@ const geistMono = Geist_Mono({
 })
 
 export const metadata: Metadata = {
+  metadataBase: getMetadataBase(),
   title: "TROLLMAX — Clone anyone. Troll everyone.",
   description:
     "Brainrot video generation & voice cloning soundboards for the meme economy.",
@@ -23,14 +25,12 @@ export const metadata: Metadata = {
     description:
       "Brainrot video generation & voice cloning soundboards for the meme economy.",
     type: "website",
-    images: [{ url: "/og-image.png", width: 1200, height: 630, alt: "TROLLMAX" }],
   },
   twitter: {
     card: "summary_large_image",
     title: "TROLLMAX — Clone anyone. Troll everyone.",
     description:
       "Brainrot video generation & voice cloning soundboards for the meme economy.",
-    images: ["/og-image.png"],
   },
 }
 

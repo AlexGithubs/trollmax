@@ -49,8 +49,9 @@ src/
 │   ├── soundboard/
 │   │   ├── SoundboardPlayer.tsx     # Audio playback UI for clips
 │   │   ├── GeneratingCard.tsx       # Animated waveform waiting screen
-│   │   ├── ShareLinkCopy.tsx        # Copy share link to clipboard
 │   │   └── DeleteBoardButton.tsx    # Delete with confirmation
+│   ├── share/
+│   │   └── ShareMenu.tsx            # Share sheet: system share, copy, X/FB/WA/SMS/email/Reddit, Instagram copy
 │   ├── landing/
 │   │   ├── HeroSection.tsx          # Landing hero + product cards
 │   │   ├── ProductCard.tsx          # Feature card component

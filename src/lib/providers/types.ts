@@ -67,6 +67,8 @@ export interface VideoComposeResult {
   jobId: string
   status: "queued" | "processing" | "complete" | "failed"
   videoUrl?: string
+  /** Public blob URL of a 1200×630 JPEG for link previews (og:image). */
+  thumbnailUrl?: string
   errorMessage?: string
 }
 

@@ -6,8 +6,9 @@ import { Button } from "@/components/ui/button"
 import { ArrowLeft, Loader2, AlertCircle, Info } from "lucide-react"
 import type { SoundboardManifest, VideoManifest } from "@/lib/manifests/types"
 import { VideoPlayer } from "@/components/video/VideoPlayer"
-import { VideoShareLink } from "@/components/video/VideoShareLink"
+import { ShareMenu } from "@/components/share/ShareMenu"
 import { DeleteVideoButton } from "@/components/video/DeleteVideoButton"
+import { getSiteBaseUrl } from "@/lib/site-url"
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -37,9 +38,7 @@ export default async function ManageVideoPage({
   const manifest = JSON.parse(raw) as VideoManifest
   if (manifest.ownerId !== user.id) notFound()
 
-  const baseUrl =
-    process.env.NEXT_PUBLIC_APP_URL ??
-    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000")
+  const baseUrl = getSiteBaseUrl() ?? "http://localhost:3000"
   const shareUrl = `${baseUrl}/v/${id}`
 
   const badge = STATUS_BADGE[manifest.status]
@@ -67,6 +66,9 @@ export default async function ManageVideoPage({
           <h1 className="truncate text-xl font-bold tracking-tight">{manifest.title}</h1>
           <p className="text-xs text-muted-foreground">{manifest.backgroundVideoId}</p>
         </div>
+        {manifest.status === "complete" && manifest.videoUrl ? (
+          <ShareMenu shareUrl={shareUrl} kind="video" className="shrink-0" />
+        ) : null}
         <span
           className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${badge.className}`}
         >
@@ -117,10 +119,7 @@ export default async function ManageVideoPage({
       </details>
 
       {manifest.status === "complete" && manifest.videoUrl && (
-        <>
-          <VideoShareLink shareUrl={shareUrl} />
-          <VideoPlayer videoUrl={manifest.videoUrl} videoId={id} />
-        </>
+        <VideoPlayer videoUrl={manifest.videoUrl} videoId={id} />
       )}
 
       {manifest.status === "processing" && (
