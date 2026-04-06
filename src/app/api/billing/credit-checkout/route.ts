@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { currentUser } from "@clerk/nextjs/server"
 import { z } from "zod"
+import Stripe from "stripe"
 import { stripe } from "@/lib/stripe"
 import { CREDIT_PACKS, validateCheckoutSelection } from "@/lib/billing/credit-packs"
 import {
@@ -67,32 +68,50 @@ export async function POST(req: Request) {
     await mergeSubscriptionRecord(user.id, { stripeCustomerId: customerId })
   }
 
-  const session = await stripe.checkout.sessions.create({
-    mode: "payment",
-    customer: customerId,
-    client_reference_id: user.id,
-    line_items: [{ price: packPriceId, quantity: 1 }],
-    success_url: `${origin}/app?credit_purchase=success`,
-    cancel_url: `${origin}/pricing/checkout?pack=${packId}&credit_purchase=canceled`,
-    metadata: {
-      clerkUserId: user.id,
-      creditPackId: packId,
-      bananaCreditsTotal: String(sel.totalCredits),
-      purchaseKind: "banana_credits",
-    },
-    payment_intent_data: {
+  try {
+    const session = await stripe.checkout.sessions.create({
+      mode: "payment",
+      customer: customerId,
+      client_reference_id: user.id,
+      line_items: [{ price: packPriceId, quantity: 1 }],
+      /** Required when Dashboard has no compatible methods enabled for dynamic PMs. */
+      payment_method_types: ["card"],
+      success_url: `${origin}/app?credit_purchase=success`,
+      cancel_url: `${origin}/pricing/checkout?pack=${packId}&credit_purchase=canceled`,
       metadata: {
         clerkUserId: user.id,
         creditPackId: packId,
         bananaCreditsTotal: String(sel.totalCredits),
         purchaseKind: "banana_credits",
       },
-    },
-  })
+      payment_intent_data: {
+        metadata: {
+          clerkUserId: user.id,
+          creditPackId: packId,
+          bananaCreditsTotal: String(sel.totalCredits),
+          purchaseKind: "banana_credits",
+        },
+      },
+    })
 
-  if (!session.url) {
-    return NextResponse.json({ error: "Checkout session missing URL" }, { status: 500 })
+    if (!session.url) {
+      return NextResponse.json({ error: "Checkout session missing URL" }, { status: 500 })
+    }
+
+    return NextResponse.json({ url: session.url })
+  } catch (err: unknown) {
+    console.error("[credit-checkout]", err)
+    const message =
+      err instanceof Stripe.errors.StripeError
+        ? err.message
+        : err instanceof Error
+          ? err.message
+          : "Checkout failed"
+    const raw =
+      err instanceof Stripe.errors.StripeError && typeof err.statusCode === "number"
+        ? err.statusCode
+        : 502
+    const status = raw >= 400 && raw < 600 ? raw : 502
+    return NextResponse.json({ error: message }, { status })
   }
-
-  return NextResponse.json({ url: session.url })
 }

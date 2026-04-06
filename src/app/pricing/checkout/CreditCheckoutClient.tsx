@@ -47,9 +47,17 @@ export function CreditCheckoutClient({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ packId }),
       })
-      const data = (await res.json()) as { url?: string; error?: string }
+      const text = await res.text()
+      let data: { url?: string; error?: string } = {}
+      if (text.trim()) {
+        try {
+          data = JSON.parse(text) as { url?: string; error?: string }
+        } catch {
+          throw new Error(text.slice(0, 200) || `Server error (${res.status})`)
+        }
+      }
       if (!res.ok) {
-        throw new Error(data.error ?? "Checkout failed")
+        throw new Error(data.error ?? `Checkout failed (${res.status})`)
       }
       if (data.url) {
         window.location.href = data.url
