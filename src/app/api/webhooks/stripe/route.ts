@@ -7,71 +7,12 @@ import { getManifestStore } from "@/lib/storage"
 import {
   getUserIdForStripeCustomer,
   linkStripeCustomerToUser,
-  mergeSubscriptionRecord,
 } from "@/lib/billing/subscription"
 
 const CREDIT_PURCHASE_DONE_KEY = (sessionId: string) =>
   `stripe:credit-purchase:${sessionId}`
 
 export const runtime = "nodejs"
-
-async function applySubscription(
-  stripeClient: Stripe,
-  subscription: Stripe.Subscription,
-  fallbackUserId: string | null | undefined
-) {
-  const customerId =
-    typeof subscription.customer === "string"
-      ? subscription.customer
-      : subscription.customer.id
-
-  let userId =
-    subscription.metadata?.clerkUserId?.trim() ||
-    fallbackUserId?.trim() ||
-    null
-
-  if (!userId) {
-    userId = await getUserIdForStripeCustomer(customerId)
-  }
-
-  if (!userId) {
-    const customer = await stripeClient.customers.retrieve(customerId)
-    if (!customer.deleted && "metadata" in customer && customer.metadata?.clerkUserId) {
-      userId = customer.metadata.clerkUserId
-    }
-  }
-
-  if (!userId) {
-    console.error(
-      "[stripe webhook] Missing Clerk user for subscription",
-      subscription.id,
-      customerId
-    )
-    return
-  }
-
-  await linkStripeCustomerToUser(customerId, userId)
-
-  const status = subscription.status
-  const entitled = status === "active" || status === "trialing"
-  const firstItem = subscription.items.data[0]
-  const price = firstItem?.price
-  const interval: "month" | "year" =
-    price?.recurring?.interval === "year" ? "year" : "month"
-  const periodEndSec = firstItem?.current_period_end
-
-  await mergeSubscriptionRecord(userId, {
-    plan: entitled ? "pro" : "free",
-    stripeCustomerId: customerId,
-    stripeSubscriptionId: subscription.id,
-    subscriptionStatus: status,
-    currentPeriodEnd:
-      periodEndSec != null
-        ? new Date(periodEndSec * 1000).toISOString()
-        : undefined,
-    priceInterval: interval,
-  })
-}
 
 async function grantBananaCreditsFromCheckoutSession(
   stripeClient: Stripe,
@@ -196,30 +137,7 @@ export async function POST(req: Request) {
         const session = event.data.object as Stripe.Checkout.Session
         if (session.mode === "payment") {
           await grantBananaCreditsFromCheckoutSession(stripe, session)
-          break
         }
-        if (session.mode !== "subscription") break
-        const userId = session.client_reference_id
-        const customerId =
-          typeof session.customer === "string" ? session.customer : session.customer?.id
-        const subId =
-          typeof session.subscription === "string"
-            ? session.subscription
-            : session.subscription?.id
-        if (customerId && userId) {
-          await linkStripeCustomerToUser(customerId, userId)
-        }
-        if (subId) {
-          const sub = await stripe.subscriptions.retrieve(subId)
-          await applySubscription(stripe, sub, userId)
-        }
-        break
-      }
-      case "customer.subscription.created":
-      case "customer.subscription.updated":
-      case "customer.subscription.deleted": {
-        const sub = event.data.object as Stripe.Subscription
-        await applySubscription(stripe, sub, null)
         break
       }
       default:

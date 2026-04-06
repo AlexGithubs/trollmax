@@ -26,7 +26,10 @@ export async function POST(_req: Request) {
   const customerId = record?.stripeCustomerId
   if (!customerId) {
     return NextResponse.json(
-      { error: "No Stripe customer on file. Subscribe from the pricing page first." },
+      {
+        error:
+          "No Stripe customer on file. Buy a credit pack from the pricing page first.",
+      },
       { status: 400 }
     )
   }

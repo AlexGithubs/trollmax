@@ -9,7 +9,7 @@ export type BillingPreviewMode = "actual" | "free" | "pro"
 export interface BillingAccess {
   /** Entitlement checks (UI + API) should use this */
   effectiveIsPro: boolean
-  /** Real Stripe/KV subscription state */
+  /** Legacy Stripe subscription in KV (product is credit packs only today) */
   actualIsPro: boolean
   /** Cookie value when admin; always "actual" for non-admins */
   previewMode: BillingPreviewMode

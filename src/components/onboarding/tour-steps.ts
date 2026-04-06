@@ -76,12 +76,13 @@ export const TOUR_STEPS: TourStep[] = [
 
   // ─── Video New steps ──────────────────────────────────────────────────────
   {
-    id: "video-script",
+    id: "video-headshot",
     page: "/app/video/new",
-    targetSelector: '[data-tour="video-script"]',
-    title: "1. Name & Script",
-    content: "Name your video and write the script the AI reads aloud. Up to 2000 chars — first 500 included, +1 credit per extra 500.",
-    placement: "bottom",
+    targetSelector: '[data-tour="video-headshot"]',
+    title: "1. Headshot & Layout",
+    content:
+      "Pick a preset portrait or upload/drag your own front-facing photo, then choose full-screen or top-half + gameplay layout.",
+    placement: "top",
     spotlightPadding: 8,
   },
   {
@@ -89,7 +90,7 @@ export const TOUR_STEPS: TourStep[] = [
     page: "/app/video/new",
     targetSelector: '[data-tour="video-voice-tabs"]',
     title: "2. Pick a Voice",
-    content: "Choose a preset AI voice, use a cloned soundboard voice, or upload your own audio sample. Presets are fastest; uploading takes a couple extra minutes.",
+    content: "Choose a preset AI voice, use a cloned soundboard voice, or upload/drag your own audio sample. Presets are fastest; uploading takes a couple extra minutes.",
     placement: "bottom",
     spotlightPadding: 6,
   },
@@ -103,12 +104,13 @@ export const TOUR_STEPS: TourStep[] = [
     spotlightPadding: 8,
   },
   {
-    id: "video-headshot",
+    id: "video-script",
     page: "/app/video/new",
-    targetSelector: '[data-tour="video-headshot"]',
-    title: "3. Talking Head Photo",
-    content: "Upload a front-facing photo — your face becomes the animated talking head. JPG, PNG, WebP, HEIC all work.",
-    placement: "top",
+    targetSelector: '[data-tour="video-script"]',
+    title: "3. Name & Script",
+    content:
+      "Name your video and write the script the AI reads aloud. Up to 2000 chars — first 500 included, +1 credit per extra 500.",
+    placement: "bottom",
     spotlightPadding: 8,
   },
   {

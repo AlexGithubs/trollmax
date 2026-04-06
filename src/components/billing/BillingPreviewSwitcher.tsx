@@ -48,7 +48,7 @@ export function BillingPreviewSwitcher({
         onChange={(e) => void onChange(e.target.value as BillingPreviewMode)}
       >
         <option value="actual">
-          Real subscription ({initialActualPro ? "Pro" : "Free"})
+          Live state ({initialActualPro ? "legacy Pro sub" : "credits / no sub"})
         </option>
         <option value="free">Preview as Free user</option>
         <option value="pro">Preview as Pro user</option>

@@ -25,6 +25,7 @@ import type {
   VoicePresetCategory,
 } from "@/lib/voice-presets/catalog"
 import { currencyIconAlt, currencyIconSrc } from "@/lib/billing/currency-display"
+import { cn } from "@/lib/utils"
 
 const DEFAULT_PHRASES = [
   "Hello there",
@@ -89,6 +90,7 @@ export default function NewSoundboardPage() {
   const [samplePreviewUrl, setSamplePreviewUrl] = useState("") // local object URL for in-page preview
   const [sampleDuration, setSampleDuration] = useState(0)
   const [sampleName, setSampleName] = useState("")
+  const [voiceDragActive, setVoiceDragActive] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Revoke object URL on unmount to avoid memory leaks
@@ -223,9 +225,7 @@ export default function NewSoundboardPage() {
     toggleOrPlayPresetPreview(p.id)
   }
 
-  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
+  async function processUploadFile(file: File) {
     const previousSampleUrl = sampleUrl
     setError("")
     setStage("processing")
@@ -233,7 +233,6 @@ export default function NewSoundboardPage() {
     let processedFile: File
     try {
       const trimmed = await trimAndEncodeAudio(file)
-      // When the browser can't decode (e.g. some video codecs), we upload the original for server-side handling.
       const usedClientWav = trimmed !== file
       processedFile = usedClientWav
         ? new File([trimmed], file.name.replace(/\.\w+$/, ".wav"), {
@@ -266,6 +265,14 @@ export default function NewSoundboardPage() {
       setError(err instanceof Error ? err.message : "Upload failed")
       setStage("idle")
     }
+  }
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    void processUploadFile(file).finally(() => {
+      if (fileInputRef.current) fileInputRef.current.value = ""
+    })
   }
 
   async function removeSample() {
@@ -682,11 +689,50 @@ export default function NewSoundboardPage() {
             </div>
           ) : (
             <>
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={busy}
-                className="flex w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border/60 py-8 text-sm text-muted-foreground hover:border-primary/50 hover:text-foreground transition-colors disabled:opacity-50"
+              <div
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (busy) return
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault()
+                    fileInputRef.current?.click()
+                  }
+                }}
+                onDragEnter={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  if (!busy) setVoiceDragActive(true)
+                }}
+                onDragLeave={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  if (!e.currentTarget.contains(e.relatedTarget as Node)) setVoiceDragActive(false)
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                }}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  setVoiceDragActive(false)
+                  if (busy) return
+                  const f = e.dataTransfer.files?.[0]
+                  if (f) {
+                    void processUploadFile(f).finally(() => {
+                      if (fileInputRef.current) fileInputRef.current.value = ""
+                    })
+                  }
+                }}
+                onClick={() => {
+                  if (!busy) fileInputRef.current?.click()
+                }}
+                className={cn(
+                  "flex w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border/60 py-8 text-sm text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground",
+                  voiceDragActive && !busy && "border-primary bg-primary/10 text-foreground",
+                  busy && "pointer-events-none opacity-50"
+                )}
               >
                 {stage === "processing" ? (
                   <>
@@ -701,14 +747,14 @@ export default function NewSoundboardPage() {
                 ) : (
                   <>
                     <Upload className="h-6 w-6" />
-                    <span>Click to upload audio</span>
+                    <span>Drop audio/video here or click to browse</span>
                     <span className="text-xs opacity-70">
                       Best results with 10-20s of clear speech · audio or video (mp4, mov, …) · max 15 MB audio /
                       80 MB video · up to 60s
                     </span>
                   </>
                 )}
-              </button>
+              </div>
             </>
           )}
           <input

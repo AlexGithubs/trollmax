@@ -36,6 +36,11 @@ import {
   formatCurrencyCost,
 } from "@/lib/billing/currency-display"
 import { videoGenerationCostBananaCredits } from "@/lib/billing/video-generation-cost"
+import {
+  HEADSHOT_PRESETS,
+  type HeadshotPreset,
+} from "@/lib/headshot-presets/catalog"
+import { cn } from "@/lib/utils"
 
 // D-ID is strict about image size; we target a safer ceiling before upload.
 const DID_HEADSHOT_TARGET_BYTES = 9_000_000
@@ -236,6 +241,9 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
   const [headshotBusyLabel, setHeadshotBusyLabel] = useState<string | null>(null)
   const [captionsEnabled, setCaptionsEnabled] = useState(true)
   const [consent, setConsent] = useState(false)
+  const [selectedHeadshotPresetId, setSelectedHeadshotPresetId] = useState<string | null>(null)
+  const [headshotDragActive, setHeadshotDragActive] = useState(false)
+  const [voiceDragActive, setVoiceDragActive] = useState(false)
   const headshotInputRef = useRef<HTMLInputElement>(null)
 
   // Revoke voice preview object URL on unmount
@@ -258,9 +266,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
       ? Boolean(selectedBoardId && selectedBoard)
       : Boolean(voiceSampleUrl)
 
-  async function handleVoiceFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
+  async function processVoiceFile(file: File) {
     const prevUrl = voiceSampleUrl
     setVoiceUploadError("")
     setVoiceUploadStage("processing")
@@ -298,6 +304,14 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
       setVoiceUploadError(err instanceof Error ? err.message : "Upload failed")
       setVoiceUploadStage("idle")
     }
+  }
+
+  function handleVoiceFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    void processVoiceFile(file).finally(() => {
+      if (voiceFileInputRef.current) voiceFileInputRef.current.value = ""
+    })
   }
 
   async function removeVoiceSample() {
@@ -338,10 +352,10 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
     }
   }, [headshotPreviewUrl])
 
-  async function handleHeadshotFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
-
+  async function processHeadshotFile(
+    file: File,
+    meta?: { displayName?: string; presetId?: string | null }
+  ) {
     setError("")
     setHeadshotUploading(true)
 
@@ -456,7 +470,8 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
       }
 
       setHeadshotImageUrl(finalUrl)
-      setHeadshotName(file.name)
+      setHeadshotName(meta?.displayName ?? file.name)
+      setSelectedHeadshotPresetId(meta?.presetId ?? null)
       setHeadshotPreviewUrl((cur) => {
         if (cur.startsWith("blob:")) URL.revokeObjectURL(cur)
         if (jpegFile && isPrivateVercelBlobUrlClient(finalUrl)) {
@@ -472,6 +487,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
       setError(err instanceof Error ? err.message : "Headshot upload failed")
       setHeadshotImageUrl("")
       setHeadshotName("")
+      setSelectedHeadshotPresetId(null)
       setHeadshotPreviewUrl((cur) => {
         if (cur.startsWith("blob:")) URL.revokeObjectURL(cur)
         return ""
@@ -481,6 +497,40 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
       if (blobUrlForRevoke) URL.revokeObjectURL(blobUrlForRevoke)
       setHeadshotBusyLabel(null)
       setHeadshotUploading(false)
+    }
+  }
+
+  function handleHeadshotFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    void processHeadshotFile(file, {
+      displayName: file.name,
+      presetId: null,
+    }).finally(() => {
+      if (headshotInputRef.current) headshotInputRef.current.value = ""
+    })
+  }
+
+  async function applyHeadshotPreset(preset: HeadshotPreset) {
+    setError("")
+    try {
+      const proxyUrl = `/api/headshot-preset-proxy?u=${encodeURIComponent(preset.imageUrl)}`
+      const res = await fetch(proxyUrl)
+      if (!res.ok) {
+        setError("Could not load that preset image. Try another preset or upload your own photo.")
+        return
+      }
+      const blob = await res.blob()
+      const ext = blob.type.includes("png") ? "png" : "jpeg"
+      const file = new File([blob], `${preset.id}.${ext}`, {
+        type: blob.type || "image/jpeg",
+      })
+      await processHeadshotFile(file, {
+        displayName: preset.displayName,
+        presetId: preset.id,
+      })
+    } catch {
+      setError("Could not load preset image. Try upload instead.")
     }
   }
 
@@ -497,6 +547,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
     } finally {
       setHeadshotImageUrl("")
       setHeadshotName("")
+      setSelectedHeadshotPresetId(null)
       setHeadshotPreviewUrl("")
       if (previewToRevoke.startsWith("blob:")) URL.revokeObjectURL(previewToRevoke)
       if (headshotInputRef.current) headshotInputRef.current.value = ""
@@ -682,8 +733,8 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">New Video</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Name your video, write a script, pick a voice, choose headshot + layout, then finalize options and
-          generate.
+          Choose a headshot and layout, pick a voice, then name your video and write the script. Finish with
+          background, captions, and generate.
         </p>
       </div>
       {noVoicesAtAll && (
@@ -709,54 +760,199 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
         </div>
       )}
 
-      {/* Step 1: Name & script */}
-      <Card data-tour="video-script" className="border-border/60 bg-card/50">
-        <CardContent className="pt-5 space-y-3">
-          <p className="text-sm font-medium">1. Name &amp; script</p>
-          <div className="space-y-1.5">
-            <label className="text-xs text-muted-foreground">Video name</label>
-            <input
-              value={videoTitle}
-              onChange={(e) => setVideoTitle(e.target.value)}
-              placeholder="e.g. Minecraft rant, birthday roast"
-              maxLength={100}
-              className="w-full rounded-md border border-border/60 bg-secondary/20 px-3 py-1.5 text-sm outline-none focus:border-primary/60"
-            />
+      {/* Step 1: Headshot & layout */}
+      <Card data-tour="video-headshot" className="border-border/60 bg-card/50">
+        <CardContent className="pt-5 space-y-4">
+          <p className="text-sm font-medium">1. Headshot &amp; layout</p>
+          <p className="text-[11px] text-muted-foreground leading-relaxed">
+            Preset images load from Wikimedia Commons through our server. You confirm you have the rights /
+            consent needed for how you use the output. Upload your own photo instead if you prefer.
+          </p>
+
+          <div className="space-y-2">
+            <label className="text-xs font-medium text-muted-foreground">Preset headshots</label>
             <p className="text-[11px] text-muted-foreground">
-              Shown on your dashboard and share links (not read aloud).
+              Tap a face — we&apos;ll fetch it and run the same face check as an upload. Name appears under
+              each portrait.
             </p>
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-xs text-muted-foreground">Script</label>
-            <div className="relative">
-              <textarea
-                value={script}
-                onChange={(e) => setScript(e.target.value)}
-                placeholder="Write what you want the AI to say in your video…"
-                maxLength={2000}
-                rows={6}
-                className="w-full rounded-md border border-border/60 bg-secondary/20 px-3 py-2 text-sm outline-none focus:border-primary/60 resize-none"
-              />
-              <span className="absolute bottom-2 right-3 text-xs text-muted-foreground">
-                {script.length}/2000
-              </span>
+            <div className="max-h-[min(300px,45vh)] overflow-y-auto pr-1">
+              <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 sm:gap-3">
+                {HEADSHOT_PRESETS.map((p) => {
+                  const selected = selectedHeadshotPresetId === p.id && Boolean(headshotImageUrl)
+                  const thumbSrc = `/api/headshot-preset-proxy?u=${encodeURIComponent(p.imageUrl)}`
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      disabled={headshotUploading}
+                      onClick={() => void applyHeadshotPreset(p)}
+                      className={cn(
+                        "flex flex-col items-center gap-1.5 rounded-xl border p-2 text-center transition-colors",
+                        selected
+                          ? "border-primary bg-primary/10 ring-2 ring-primary/35"
+                          : "border-border/50 bg-card/40 hover:border-border"
+                      )}
+                    >
+                      <img
+                        src={thumbSrc}
+                        alt=""
+                        className="h-12 w-12 rounded-full border border-border/40 object-cover sm:h-14 sm:w-14"
+                      />
+                      <span className="line-clamp-2 text-[10px] font-medium leading-tight sm:text-xs">
+                        {p.displayName}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
             </div>
-            <p className="text-[11px] text-muted-foreground flex flex-wrap items-center gap-1.5">
-              <span>
-                Base rate includes the first 500 characters; each additional 500 (or part) adds 1
-                banana credit.
-              </span>
-              <span className="inline-flex items-center gap-1 text-foreground/90">
-                {formatCurrencyCost(videoExportBananaCredits)}
-                <NextImage
-                  src={currencyIconSrc()}
-                  alt={currencyIconAlt()}
-                  width={12}
-                  height={12}
-                  className="inline-block shrink-0"
-                />
-              </span>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-xs font-medium text-muted-foreground">Or upload / drag &amp; drop</label>
+            <p className="text-xs text-muted-foreground/90">
+              One clear, front-facing face (we verify before sending to the animator).
             </p>
+
+            <input
+              ref={headshotInputRef}
+              type="file"
+              accept="image/*,.heic,.heif"
+              className="hidden"
+              onChange={handleHeadshotFileChange}
+            />
+
+            {headshotPreviewUrl ? (
+              <div className="flex items-center gap-3 rounded-xl border border-border/50 bg-secondary/20 p-3">
+                <img
+                  src={headshotPreviewUrl}
+                  alt=""
+                  className="h-20 w-20 shrink-0 rounded-lg border border-border/40 bg-secondary/30 object-cover"
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium" title={headshotName}>
+                    {headshotName || "Headshot"}
+                  </p>
+                  <p className="text-xs text-muted-foreground">Ready to animate</p>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="text-xs"
+                    disabled={headshotUploading}
+                    onClick={() => headshotInputRef.current?.click()}
+                  >
+                    <Upload className="mr-1.5 h-3.5 w-3.5" />
+                    Replace
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="text-xs text-destructive hover:text-destructive"
+                    disabled={headshotUploading}
+                    onClick={() => void removeHeadshot()}
+                  >
+                    <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                    Remove
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault()
+                    headshotInputRef.current?.click()
+                  }
+                }}
+                onDragEnter={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  setHeadshotDragActive(true)
+                }}
+                onDragLeave={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  if (!e.currentTarget.contains(e.relatedTarget as Node)) setHeadshotDragActive(false)
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                }}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  setHeadshotDragActive(false)
+                  const f = e.dataTransfer.files?.[0]
+                  if (f && /^image\//i.test(f.type)) {
+                    void processHeadshotFile(f, { displayName: f.name, presetId: null })
+                  }
+                }}
+                onClick={() => !headshotUploading && headshotInputRef.current?.click()}
+                className={cn(
+                  "flex w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed py-8 text-sm text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground",
+                  headshotDragActive && !headshotUploading
+                    ? "border-primary bg-primary/10 text-foreground"
+                    : "border-border/60",
+                  headshotUploading && "pointer-events-none opacity-50"
+                )}
+              >
+                <ImageIcon className="h-6 w-6" />
+                <span>
+                  {headshotUploading
+                    ? headshotBusyLabel ?? "Working…"
+                    : "Drop an image here or click to browse"}
+                </span>
+                <span className="text-xs opacity-70">
+                  JPG, PNG, WebP, HEIC, GIF… · max ~25 MB · converted to JPEG automatically
+                </span>
+              </div>
+            )}
+          </div>
+
+          <div data-tour="video-layout" className="space-y-2">
+            <label className="text-xs text-muted-foreground">Layout</label>
+            <div className="flex rounded-lg border border-border/50 bg-secondary/20 p-0.5">
+              <button
+                type="button"
+                onClick={() => setTalkingMode("full")}
+                className={[
+                  "flex flex-1 items-center justify-center gap-1.5 rounded-md py-2 text-xs font-medium transition-colors",
+                  talkingMode === "full"
+                    ? "bg-card text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground",
+                ].join(" ")}
+              >
+                Full screen
+              </button>
+              <button
+                type="button"
+                onClick={() => setTalkingMode("half")}
+                className={[
+                  "flex flex-1 items-center justify-center gap-1.5 rounded-md py-2 text-xs font-medium transition-colors",
+                  talkingMode === "half"
+                    ? "bg-card text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground",
+                ].join(" ")}
+              >
+                Top half + background
+              </button>
+            </div>
+
+            {talkingMode === "half" ? (
+              <p className="text-xs text-muted-foreground">
+                The talking head will animate on the top half; the selected background stays on the bottom.
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Background is ignored in full-screen mode.
+              </p>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -980,11 +1176,50 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
                   </div>
                 </div>
               ) : (
-                <button
-                  type="button"
-                  disabled={voiceUploadBusy}
-                  onClick={() => voiceFileInputRef.current?.click()}
-                  className="flex w-full flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border/60 bg-secondary/10 px-4 py-6 text-center transition-colors hover:border-primary/40 hover:bg-primary/5 disabled:opacity-60"
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (voiceUploadBusy) return
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault()
+                      voiceFileInputRef.current?.click()
+                    }
+                  }}
+                  onDragEnter={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    if (!voiceUploadBusy) setVoiceDragActive(true)
+                  }}
+                  onDragLeave={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    if (!e.currentTarget.contains(e.relatedTarget as Node)) setVoiceDragActive(false)
+                  }}
+                  onDragOver={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    setVoiceDragActive(false)
+                    if (voiceUploadBusy) return
+                    const f = e.dataTransfer.files?.[0]
+                    if (f) {
+                      void processVoiceFile(f).finally(() => {
+                        if (voiceFileInputRef.current) voiceFileInputRef.current.value = ""
+                      })
+                    }
+                  }}
+                  onClick={() => {
+                    if (!voiceUploadBusy) voiceFileInputRef.current?.click()
+                  }}
+                  className={cn(
+                    "flex w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border/60 bg-secondary/10 px-4 py-6 text-center transition-colors hover:border-primary/40 hover:bg-primary/5",
+                    voiceDragActive && !voiceUploadBusy && "border-primary bg-primary/10",
+                    voiceUploadBusy && "pointer-events-none opacity-60"
+                  )}
                 >
                   {voiceUploadBusy ? (
                     <>
@@ -997,14 +1232,14 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
                     <>
                       <Upload className="h-6 w-6 text-muted-foreground" />
                       <div>
-                        <p className="text-sm font-medium">Click to upload voice sample</p>
+                        <p className="text-sm font-medium">Drop audio/video here or click to browse</p>
                         <p className="mt-0.5 text-xs text-muted-foreground">
                           MP3, WAV, M4A, or video with audio · 6–60 sec · 15 MB max
                         </p>
                       </div>
                     </>
                   )}
-                </button>
+                </div>
               )}
 
               {voiceUploadError && (
@@ -1044,124 +1279,54 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
         </CardContent>
       </Card>
 
-      {/* Step 3: Talking head */}
-      <Card data-tour="video-headshot" className="border-border/60 bg-card/50">
+      {/* Step 3: Name & script */}
+      <Card data-tour="video-script" className="border-border/60 bg-card/50">
         <CardContent className="pt-5 space-y-3">
-          <p className="text-sm font-medium">3. Talking head</p>
-
-          <div className="space-y-3">
-            <div className="space-y-2">
-              <label className="text-xs text-muted-foreground">Headshot photo</label>
-              <p className="text-xs text-muted-foreground/90">
-                Use one clear, front-facing face that fills a good part of the frame (we check this before
-                upload).
-              </p>
-
-              <input
-                ref={headshotInputRef}
-                type="file"
-                accept="image/*,.heic,.heif"
-                className="hidden"
-                onChange={handleHeadshotFileChange}
+          <p className="text-sm font-medium">3. Name &amp; script</p>
+          <div className="space-y-1.5">
+            <label className="text-xs text-muted-foreground">Video name</label>
+            <input
+              value={videoTitle}
+              onChange={(e) => setVideoTitle(e.target.value)}
+              placeholder="e.g. Minecraft rant, birthday roast"
+              maxLength={100}
+              className="w-full rounded-md border border-border/60 bg-secondary/20 px-3 py-1.5 text-sm outline-none focus:border-primary/60"
+            />
+            <p className="text-[11px] text-muted-foreground">
+              Shown on your dashboard and share links (not read aloud).
+            </p>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs text-muted-foreground">Script</label>
+            <div className="relative">
+              <textarea
+                value={script}
+                onChange={(e) => setScript(e.target.value)}
+                placeholder="Write what you want the AI to say in your video…"
+                maxLength={2000}
+                rows={6}
+                className="w-full rounded-md border border-border/60 bg-secondary/20 px-3 py-2 text-sm outline-none focus:border-primary/60 resize-none"
               />
-
-              {headshotPreviewUrl ? (
-                <div className="flex items-center gap-3 rounded-xl border border-border/50 bg-secondary/20 p-3">
-                  <img
-                    src={headshotPreviewUrl}
-                    alt=""
-                    className="h-20 w-20 shrink-0 rounded-lg border border-border/40 bg-secondary/30 object-cover"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium" title={headshotName}>
-                      {headshotName || "Headshot"}
-                    </p>
-                    <p className="text-xs text-muted-foreground">Ready to animate</p>
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="text-xs"
-                    disabled={headshotUploading}
-                      onClick={() => headshotInputRef.current?.click()}
-                    >
-                      <Upload className="mr-1.5 h-3.5 w-3.5" />
-                      Replace
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="text-xs text-destructive hover:text-destructive"
-                    disabled={headshotUploading}
-                      onClick={() => void removeHeadshot()}
-                    >
-                      <Trash2 className="mr-1.5 h-3.5 w-3.5" />
-                      Remove
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => headshotInputRef.current?.click()}
-                  disabled={headshotUploading}
-                  className="flex w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border/60 py-8 text-sm text-muted-foreground hover:border-primary/50 hover:text-foreground transition-colors disabled:opacity-50"
-                >
-                  <ImageIcon className="h-6 w-6" />
-                  <span>
-                    {headshotUploading
-                      ? headshotBusyLabel ?? "Working…"
-                      : "Click to upload headshot"}
-                  </span>
-                  <span className="text-xs opacity-70">
-                    JPG, PNG, WebP, HEIC, GIF… · max ~25 MB · converted to JPEG automatically
-                  </span>
-                </button>
-              )}
+              <span className="absolute bottom-2 right-3 text-xs text-muted-foreground">
+                {script.length}/2000
+              </span>
             </div>
-
-            <div data-tour="video-layout" className="space-y-2">
-              <label className="text-xs text-muted-foreground">Layout</label>
-              <div className="flex rounded-lg border border-border/50 p-0.5 bg-secondary/20">
-                <button
-                  type="button"
-                  onClick={() => setTalkingMode("full")}
-                  className={[
-                    "flex flex-1 items-center justify-center gap-1.5 rounded-md py-2 text-xs font-medium transition-colors",
-                    talkingMode === "full"
-                      ? "bg-card text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground",
-                  ].join(" ")}
-                >
-                  Full screen
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setTalkingMode("half")}
-                  className={[
-                    "flex flex-1 items-center justify-center gap-1.5 rounded-md py-2 text-xs font-medium transition-colors",
-                    talkingMode === "half"
-                      ? "bg-card text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground",
-                  ].join(" ")}
-                >
-                  Top half + background
-                </button>
-              </div>
-
-              {talkingMode === "half" ? (
-                <p className="text-xs text-muted-foreground">
-                  The talking head will animate on the top half; the selected background stays on the bottom.
-                </p>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  Background is ignored in full-screen mode.
-                </p>
-              )}
-            </div>
+            <p className="text-[11px] text-muted-foreground flex flex-wrap items-center gap-1.5">
+              <span>
+                Base rate includes the first 500 characters; each additional 500 (or part) adds 1
+                banana credit.
+              </span>
+              <span className="inline-flex items-center gap-1 text-foreground/90">
+                {formatCurrencyCost(videoExportBananaCredits)}
+                <NextImage
+                  src={currencyIconSrc()}
+                  alt={currencyIconAlt()}
+                  width={12}
+                  height={12}
+                  className="inline-block shrink-0"
+                />
+              </span>
+            </p>
           </div>
         </CardContent>
       </Card>
