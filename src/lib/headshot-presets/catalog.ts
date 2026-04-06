@@ -1,12 +1,18 @@
 /**
- * Preset talking-head images loaded via our proxy from Wikimedia Commons (HTTPS only, host allowlisted).
- * You are responsible for how you use generated content; replace URLs if a file moves on Commons.
+ * Preset talking-head images: Wikimedia Commons URLs (HTTPS, allowlisted) fetched via our proxy, or a path
+ * under `public/` (starts with `/`) served as a static asset.
  */
 export interface HeadshotPreset {
   id: string
   displayName: string
-  /** Full HTTPS URL on upload.wikimedia.org */
+  /** Wikimedia image URL, or `/…` path under `public/` */
   imageUrl: string
+}
+
+/** Thumbnail / fetch URL for a preset (proxy for Commons, direct for static). */
+export function headshotPresetImageSrc(preset: HeadshotPreset): string {
+  if (preset.imageUrl.startsWith("/")) return preset.imageUrl
+  return `/api/headshot-preset-proxy?u=${encodeURIComponent(preset.imageUrl)}`
 }
 
 export const HEADSHOT_PRESETS: HeadshotPreset[] = [
@@ -48,9 +54,7 @@ export const HEADSHOT_PRESETS: HeadshotPreset[] = [
   {
     id: "david-goggins",
     displayName: "David Goggins",
-    /** Official-style frontal portrait (U.S. Navy), not the side/profile race photo. */
-    imageUrl:
-      "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c2/David_A._Goggins.jpg/330px-David_A._Goggins.jpg",
+    imageUrl: "/headshots/david-goggins.jpg",
   },
   {
     id: "benjamin-netanyahu",

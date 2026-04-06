@@ -38,6 +38,7 @@ import {
 import { videoGenerationCostBananaCredits } from "@/lib/billing/video-generation-cost"
 import {
   HEADSHOT_PRESETS,
+  headshotPresetImageSrc,
   type HeadshotPreset,
 } from "@/lib/headshot-presets/catalog"
 import { cn } from "@/lib/utils"
@@ -514,8 +515,8 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
   async function applyHeadshotPreset(preset: HeadshotPreset) {
     setError("")
     try {
-      const proxyUrl = `/api/headshot-preset-proxy?u=${encodeURIComponent(preset.imageUrl)}`
-      const res = await fetch(proxyUrl)
+      const src = headshotPresetImageSrc(preset)
+      const res = await fetch(src)
       if (!res.ok) {
         setError("Could not load that preset image. Try another preset or upload your own photo.")
         return
@@ -765,8 +766,9 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
         <CardContent className="pt-5 space-y-4">
           <p className="text-sm font-medium">1. Headshot &amp; layout</p>
           <p className="text-[11px] text-muted-foreground leading-relaxed">
-            Preset images load from Wikimedia Commons through our server. You confirm you have the rights /
-            consent needed for how you use the output. Upload your own photo instead if you prefer.
+            Most presets load from Wikimedia Commons through our server; a few use bundled portraits. You
+            confirm you have the rights / consent needed for how you use the output. Upload your own photo
+            instead if you prefer.
           </p>
 
           <div className="space-y-2">
@@ -779,7 +781,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
               <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 sm:gap-3">
                 {HEADSHOT_PRESETS.map((p) => {
                   const selected = selectedHeadshotPresetId === p.id && Boolean(headshotImageUrl)
-                  const thumbSrc = `/api/headshot-preset-proxy?u=${encodeURIComponent(p.imageUrl)}`
+                  const thumbSrc = headshotPresetImageSrc(p)
                   return (
                     <button
                       key={p.id}
