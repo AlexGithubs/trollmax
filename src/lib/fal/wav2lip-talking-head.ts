@@ -22,11 +22,23 @@ function parsePadsEnv(): [number, number, number, number] {
   return [parts[0]!, parts[1]!, parts[2]!, parts[3]!]
 }
 
-function parseResizeFactor(): number | undefined {
+/**
+ * Default 2: fal docs note 480p/720p often works best; factor 1 + large batches
+ * commonly triggers GPU OOM → opaque 500s on fal (see dashboard "Internal Error").
+ */
+function parseResizeFactor(): number {
   const raw = process.env.FAL_WAV2LIP_RESIZE_FACTOR?.trim()
-  if (!raw) return undefined
+  if (!raw) return 2
   const n = Number.parseInt(raw, 10)
-  if (!Number.isFinite(n) || n < 1) return undefined
+  if (!Number.isFinite(n) || n < 1) return 2
+  return n
+}
+
+function parsePositiveIntEnv(key: string, fallback: number): number {
+  const raw = process.env[key]?.trim()
+  if (!raw) return fallback
+  const n = Number.parseInt(raw, 10)
+  if (!Number.isFinite(n) || n < 1) return fallback
   return n
 }
 
@@ -61,6 +73,9 @@ export async function falWav2lipTalkingHeadUrl(opts: {
   const fps = fpsRaw ? Number.parseFloat(fpsRaw) : 25
   const fpsN = Number.isFinite(fps) ? fps : 25
   const resizeFactor = parseResizeFactor()
+  /** fal defaults 16 / 128 are heavy; lower reduces GPU OOM → 500 on long audio. */
+  const faceDetBatchSize = parsePositiveIntEnv("FAL_WAV2LIP_FACE_DET_BATCH_SIZE", 8)
+  const wav2lipBatchSize = parsePositiveIntEnv("FAL_WAV2LIP_BATCH_SIZE", 64)
 
   const baseInput: Record<string, unknown> = {
     face_url: faceFile,
@@ -68,8 +83,10 @@ export async function falWav2lipTalkingHeadUrl(opts: {
     static: true,
     fps: fpsN,
     pads,
+    resize_factor: resizeFactor,
+    face_det_batch_size: faceDetBatchSize,
+    wav2lip_batch_size: wav2lipBatchSize,
   }
-  if (resizeFactor !== undefined) baseInput.resize_factor = resizeFactor
 
   let input: Record<string, unknown>
   try {
