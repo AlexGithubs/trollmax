@@ -19,3 +19,21 @@ export function isGenerationConfigError(err: unknown): err is GenerationConfigEr
   }
   return err instanceof Error && err.name === "GenerationConfigError"
 }
+
+/** User-fixable input (e.g. headshot rejected by D-ID celebrity filter). */
+export class GenerationUserInputError extends Error {
+  readonly code = "GENERATION_USER_INPUT" as const
+
+  constructor(message: string) {
+    super(message)
+    this.name = "GenerationUserInputError"
+  }
+}
+
+export function isGenerationUserInputError(err: unknown): err is GenerationUserInputError {
+  if (err instanceof GenerationUserInputError) return true
+  if (err && typeof err === "object" && "code" in err) {
+    return (err as { code?: unknown }).code === "GENERATION_USER_INPUT"
+  }
+  return err instanceof Error && err.name === "GenerationUserInputError"
+}

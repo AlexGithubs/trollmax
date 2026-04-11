@@ -16,7 +16,8 @@ import type {
   SynthesizeResult,
 } from "../types"
 import { getFileStore } from "@/lib/storage"
-import { blobUrlForExternalFetch } from "@/lib/storage/blob"
+import { urlForReplicateModelInput } from "@/lib/replicate/url-for-model-input"
+import { resolveReplicateOutputMediaUrl } from "@/lib/replicate/resolve-output-media-url"
 import { nanoid } from "nanoid"
 
 export class ReplicateF5TTSProvider implements TTSProvider {
@@ -37,7 +38,7 @@ export class ReplicateF5TTSProvider implements TTSProvider {
 
   async synthesize(opts: SynthesizeOptions): Promise<SynthesizeResult> {
     const refAudio = opts.voiceId.trim().startsWith("http")
-      ? await blobUrlForExternalFetch(opts.voiceId.trim())
+      ? await urlForReplicateModelInput(this.client, opts.voiceId.trim(), { filenameStem: "voice_ref" })
       : opts.voiceId.trim()
 
     const output = await this.client.run("x-lance/f5-tts:87faf6dd7a692dd82043f662e76369cab126a2cf1937e25a9d41e0b834fd230e", {
@@ -49,16 +50,16 @@ export class ReplicateF5TTSProvider implements TTSProvider {
       },
     })
 
-    // Output is a URL string or file object depending on SDK version
-    let audioBuffer: Buffer
-    if (typeof output === "string") {
-      const res = await fetch(output)
+    let audioBuffer: Buffer | undefined
+    try {
+      const mediaUrl = resolveReplicateOutputMediaUrl(output, "F5-TTS")
+      const res = await fetch(mediaUrl)
       audioBuffer = Buffer.from(await res.arrayBuffer())
-    } else if (output && typeof (output as { url?: () => string }).url === "function") {
-      const url = (output as { url: () => string }).url()
-      const res = await fetch(url)
-      audioBuffer = Buffer.from(await res.arrayBuffer())
-    } else if (output instanceof ReadableStream) {
+    } catch {
+      // Not a URL-shaped result — try consuming as a byte stream (e.g. raw ReadableStream).
+    }
+
+    if (!audioBuffer && output instanceof ReadableStream) {
       const reader = (output as ReadableStream<Uint8Array>).getReader()
       const chunks: Uint8Array[] = []
       for (;;) {
@@ -67,7 +68,9 @@ export class ReplicateF5TTSProvider implements TTSProvider {
         chunks.push(value)
       }
       audioBuffer = Buffer.concat(chunks)
-    } else {
+    }
+
+    if (!audioBuffer) {
       throw new Error(`Unexpected output format from Replicate F5-TTS: ${typeof output}`)
     }
 

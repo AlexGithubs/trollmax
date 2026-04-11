@@ -10,6 +10,7 @@
  */
 import { nanoid } from "nanoid"
 import { getFileStore } from "@/lib/storage"
+import { getBlobPutAccess } from "@/lib/storage/blob-env-sync"
 import { extractOgPosterJpegFromMp4 } from "@/lib/media/extract-poster-from-mp4"
 import type {
   VideoComposer,
@@ -28,6 +29,9 @@ export class ModalFFmpegComposer implements VideoComposer {
   }
 
   async compose(opts: VideoComposeOptions): Promise<VideoComposeResult> {
+    if (!opts.audioBytes?.length && !opts.audioUrl?.trim()) {
+      throw new Error("ModalFFmpegComposer: provide audioUrl or non-empty audioBytes")
+    }
     const jobId = nanoid(10)
     const rawBackground = opts.backgroundVideoUrl
     const hasTalking = Boolean(opts.talkingVideoUrl?.trim())
@@ -112,7 +116,7 @@ export class ModalFFmpegComposer implements VideoComposer {
         `thumbnails/${jobId}.jpg`,
         jpeg,
         "image/jpeg",
-        "public"
+        getBlobPutAccess()
       )
       thumbnailUrl = url
     } catch (thumbErr) {

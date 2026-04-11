@@ -1,4 +1,10 @@
+import { DidCelebrityBlockedError } from "@/lib/d-id/did-celebrity-error"
+import { GenerationUserInputError } from "@/lib/generation/errors"
 import { downloadBlobBuffer } from "@/lib/storage/blob"
+import {
+  isDidCelebrityDetectedBody,
+  userMessageFromDidErrorBody,
+} from "@/lib/d-id/user-message-from-did-error"
 
 /**
  * D-ID `POST /talks` validates `source_url` with a strict pattern (must end in .jpg/.png, no odd query strings).
@@ -32,6 +38,9 @@ export async function didSourceUrlFromHeadshotBuffer(
 
   if (!res.ok) {
     const text = await res.text().catch(() => "")
+    if (isDidCelebrityDetectedBody(text)) throw new DidCelebrityBlockedError()
+    const friendly = userMessageFromDidErrorBody(res.status, text)
+    if (friendly) throw new GenerationUserInputError(friendly)
     throw new Error(
       `D-ID image upload failed: ${res.status} ${res.statusText}${text ? ` — ${text}` : ""}`
     )

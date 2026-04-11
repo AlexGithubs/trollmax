@@ -766,9 +766,10 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
         <CardContent className="pt-5 space-y-4">
           <p className="text-sm font-medium">1. Headshot &amp; layout</p>
           <p className="text-[11px] text-muted-foreground leading-relaxed">
-            Most presets load from Wikimedia Commons through our server; a few use bundled portraits. You
-            confirm you have the rights / consent needed for how you use the output. Upload your own photo
-            instead if you prefer.
+            Preset portraits are bundled with the app (no live Wikipedia fetch). You confirm you have the
+            rights / consent needed for how you use the output. Upload your own photo instead if you prefer.
+            D-ID may refuse some headshots if their system flags them as a public figure—try another face or
+            your own photo if that happens.
           </p>
 
           <div className="space-y-2">

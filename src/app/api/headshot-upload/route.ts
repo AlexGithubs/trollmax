@@ -52,7 +52,23 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Rate limit exceeded. Try again later." }, { status: 429 })
   }
 
-  const formData = await req.formData()
+  const ct = req.headers.get("content-type") ?? ""
+  if (!ct.toLowerCase().includes("multipart/form-data")) {
+    return NextResponse.json(
+      { error: "Expected multipart/form-data (file upload)." },
+      { status: 415 }
+    )
+  }
+
+  let formData: FormData
+  try {
+    formData = await req.formData()
+  } catch {
+    return NextResponse.json(
+      { error: "Invalid or empty upload body. Try choosing the photo again." },
+      { status: 400 }
+    )
+  }
   const file = formData.get("file")
   if (!(file instanceof Blob)) {
     return NextResponse.json({ error: "No file provided" }, { status: 400 })

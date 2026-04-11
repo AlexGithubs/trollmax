@@ -46,7 +46,8 @@ export interface CaptionsProvider {
 // ── Video Composer ───────────────────────────────────────────────────────────
 
 export interface VideoComposeOptions {
-  audioUrl: string
+  /** Required when `audioBytes` is not set — URL Modal can GET (public blob or non-Vercel HTTPS). */
+  audioUrl?: string
   /** Pre-downloaded audio bytes. When provided, Modal receives audio inline (base64) and never
    * needs to fetch the blob URL — avoids 403 on private Vercel Blob stores. */
   audioBytes?: Buffer

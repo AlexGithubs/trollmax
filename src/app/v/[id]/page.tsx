@@ -7,6 +7,7 @@ import { ShareMenu } from "@/components/share/ShareMenu"
 import { Video, ArrowRight } from "lucide-react"
 import Link from "next/link"
 import { getSiteBaseUrl } from "@/lib/site-url"
+import { isPrivateVercelBlobUrl } from "@/lib/storage/blob"
 
 const SHARE_BLURB =
   "Check out what I made on Trollmax.xyz! Watch this AI-generated video on TROLLMAX."
@@ -21,9 +22,11 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 
   const base = getSiteBaseUrl() ?? ""
   const canonical = base ? `${base}/v/${id}` : `/v/${id}`
-  const ogImage = m.thumbnailUrl
-    ? [{ url: m.thumbnailUrl, width: 1200, height: 630, alt: m.title }]
-    : [{ url: "/opengraph-image", width: 1200, height: 630, alt: "TROLLMAX" }]
+  // Private blob URLs are not readable by crawlers; use the default OG art instead.
+  const ogImage =
+    m.thumbnailUrl && !isPrivateVercelBlobUrl(m.thumbnailUrl)
+      ? [{ url: m.thumbnailUrl, width: 1200, height: 630, alt: m.title }]
+      : [{ url: "/opengraph-image", width: 1200, height: 630, alt: "TROLLMAX" }]
 
   return {
     title: `${m.title} · Trollmax`,

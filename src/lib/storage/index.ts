@@ -31,7 +31,7 @@ export function getFileStore(): FileStore {
     const { MockFileStore } = require("./mock-store") as typeof import("./mock-store")
     _fileStore = new MockFileStore()
   } else if (process.env.BLOB_READ_WRITE_TOKEN) {
-    // Vercel Blob — upload access from getBlobPutAccess() (BLOB_UPLOAD_ACCESS); Replicate uses signed URLs for private blobs
+    // Vercel Blob — upload access from getBlobPutAccess() (BLOB_UPLOAD_ACCESS); Replicate inputs use replicate.files.create for private blobs
     const { VercelBlobStore } = require("./blob") as typeof import("./blob")
     _fileStore = new VercelBlobStore()
   } else {

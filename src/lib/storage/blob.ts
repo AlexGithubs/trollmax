@@ -6,9 +6,11 @@ import { getBlobPutAccess } from "./blob-env-sync"
  *
  * Prefer a **private** Vercel Blob store. Upload access defaults to `getBlobPutAccess()`
  * (`private`, or `public` when `BLOB_UPLOAD_ACCESS=public` matches a public-only store).
- * For Replicate, D-ID, Modal, etc., use {@link blobUrlForExternalFetch} for private blobs.
+ * Not for Replicate: private blobs are not anonymously readable; use
+ * {@link import("@/lib/replicate/url-for-model-input").urlForReplicateModelInput} (upload via
+ * `replicate.files.create`). D-ID uses buffered uploads elsewhere, not raw blob URLs.
  */
-import { del, get, head, put } from "@vercel/blob"
+import { del, get, put } from "@vercel/blob"
 import type { FileStore } from "./types"
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -31,27 +33,6 @@ export function isPrivateVercelBlobUrl(url: string): boolean {
     url.includes("blob.vercel-storage.com") &&
     !url.includes(".public.blob.vercel-storage.com")
   )
-}
-
-/**
- * Replicate, Whisper-on-Replicate, Modal FFmpeg, etc. fetch assets without our auth.
- * D-ID rejects Vercel private signed URLs for `source_url` and `audio_url`; use `POST /images` and
- * `POST /audios` instead (`didSourceUrlFromHeadshotBuffer`, `didAudioUrlFromBlobUrl`). Private blob
- * canonical URLs are not anonymously readable;
- * `head().downloadUrl` is not enough for server-side `fetch` (403). For **this app’s server**, use
- * {@link downloadBlobBuffer} (`get` + bearer). For **third-party HTTP** fetchers, `downloadUrl` may still apply.
- * Public blob URLs and normal HTTPS URLs are returned unchanged.
- */
-export async function blobUrlForExternalFetch(url: string): Promise<string> {
-  const u = url.trim()
-  if (!u.startsWith("http")) return u
-  if (!isPrivateVercelBlobUrl(u)) return u
-  const meta = await head(u)
-  const signed = meta.downloadUrl
-  if (!signed) {
-    throw new Error("blobUrlForExternalFetch: missing downloadUrl for private blob")
-  }
-  return signed
 }
 
 /**

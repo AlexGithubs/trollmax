@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto"
 import { NextResponse } from "next/server"
-import { isGenerationConfigError } from "@/lib/generation/errors"
+import {
+  isGenerationConfigError,
+  isGenerationUserInputError,
+} from "@/lib/generation/errors"
 import { isLikelyUpstreamRateLimit, notifyOpsRateLimitEvent } from "@/lib/ops/rate-limit-alert"
 
 const UPSTREAM_BUSY_MESSAGE =
@@ -50,6 +53,22 @@ export function jsonGenerationErrorResponse(
         ref,
       },
       { status: 503 }
+    )
+  }
+  if (isGenerationUserInputError(err)) {
+    const msg =
+      err instanceof Error
+        ? err.message
+        : typeof err === "object" && err !== null && "message" in err
+          ? String((err as { message: unknown }).message)
+          : String(err)
+    return NextResponse.json(
+      {
+        error: msg,
+        code: "GENERATION_USER_INPUT",
+        ref,
+      },
+      { status: 422 }
     )
   }
   if (isLikelyUpstreamRateLimit(err)) {

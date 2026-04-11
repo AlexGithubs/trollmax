@@ -4,7 +4,8 @@ import { NextResponse } from "next/server"
 import { currentUser } from "@clerk/nextjs/server"
 import Replicate from "replicate"
 import { getManifestStore, getFileStore } from "@/lib/storage"
-import { blobUrlForExternalFetch, downloadBlobBuffer, isPrivateVercelBlobUrl } from "@/lib/storage/blob"
+import { downloadBlobBuffer, isPrivateVercelBlobUrl } from "@/lib/storage/blob"
+import { urlForReplicateModelInput } from "@/lib/replicate/url-for-model-input"
 import { didAudioUrlFromBlobUrl } from "@/lib/d-id/upload-audio-for-talk"
 import { didSourceUrlFromHeadshotBuffer } from "@/lib/d-id/upload-headshot-for-talk"
 import { getVideoComposer } from "@/lib/providers"
@@ -24,6 +25,17 @@ import {
   creditBananaCredits,
 } from "@/lib/billing/banana-credits"
 import { videoGenerationCostBananaCredits } from "@/lib/billing/video-generation-cost"
+import { DidCelebrityBlockedError, isDidCelebrityBlockedError } from "@/lib/d-id/did-celebrity-error"
+import {
+  isDidCelebrityDetectedBody,
+  userMessageFromDidErrorBody,
+} from "@/lib/d-id/user-message-from-did-error"
+import {
+  GenerationUserInputError,
+  isGenerationUserInputError,
+} from "@/lib/generation/errors"
+import { falWav2lipTalkingHeadUrl } from "@/lib/fal/wav2lip-talking-head"
+import { replicateSadTalkerTalkingHeadUrl } from "@/lib/replicate/sadtalker-talking-head"
 import { jsonGenerationErrorResponse } from "@/lib/security/generation-error"
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -139,7 +151,6 @@ export async function POST(
       text: scriptForSpeech,
       ...(synth.refText ? { refText: synth.refText } : {}),
     })
-    const audioUrlForFetch = await blobUrlForExternalFetch(audioUrl)
     // Pre-download audio bytes when the blob is private so Modal doesn't need to fetch
     // the blob URL itself (private Vercel blobs require auth; Modal has no token).
     let audioBytes: Buffer | undefined
@@ -157,11 +168,14 @@ export async function POST(
       if (process.env.REPLICATE_API_TOKEN) {
         try {
           const replicate = new Replicate({ auth: process.env.REPLICATE_API_TOKEN })
+          const whisperFileUrl = await urlForReplicateModelInput(replicate, audioUrl, {
+            filenameStem: "whisper_audio",
+          })
           const result = await replicate.run(
             "thomasmol/whisper-diarization:1495a9cddc83b2203b0d8d3516e38b80fd1572ebc4bc5700ac1da56a9b3ed886",
             {
               input: {
-                file_url: audioUrlForFetch,
+                file_url: whisperFileUrl,
                 language: "en",
               },
             }
@@ -183,13 +197,12 @@ export async function POST(
       })
     }
 
-    // ── Step 4: D-ID talking head video ──────────────────────────────────────────
+    // ── Step 4: D-ID talking head video (fal Wav2Lip backup; optional Replicate SadTalker if env opt-in) ──
     await updateProgress({ progressStep: "Creating talking head (D-ID)…", progressPct: 45 })
     const isMock = process.env.NEXT_PUBLIC_MOCK_MODE === "true"
     let talkingVideoUrl: string | undefined
 
     if (!isMock) {
-      console.time(`[video/generate] d-id:${id}`)
       if (!manifest.headshotImageUrl) {
         throw new Error("Missing headshotImageUrl in manifest")
       }
@@ -197,130 +210,221 @@ export async function POST(
         throw new Error("Missing/invalid talkingMode in manifest")
       }
 
-      let didUsername = process.env.DID_API_USERNAME ?? ""
-      let didPassword = process.env.DID_API_PASSWORD ?? ""
-      didUsername = didUsername.trim()
-      didPassword = didPassword.trim()
+      const replicateToken = process.env.REPLICATE_API_TOKEN?.trim()
+      const falKey = process.env.FAL_KEY?.trim()
+      const sadTalkerFallbackEnabled =
+        process.env.TROLLMAX_SADTALKER_FALLBACK === "true" && Boolean(replicateToken)
 
-      // D-ID Studio key is typically provided as a single `API_USERNAME:API_PASSWORD` string.
-      // We accept that format too to reduce friction.
-      if (!didPassword && didUsername.includes(":")) {
-        const [u, ...rest] = didUsername.split(":")
-        didUsername = u
-        didPassword = rest.join(":")
-      }
+      const runDidTalkingHead = async (): Promise<string> => {
+        let didUsername = process.env.DID_API_USERNAME ?? ""
+        let didPassword = process.env.DID_API_PASSWORD ?? ""
+        didUsername = didUsername.trim()
+        didPassword = didPassword.trim()
 
-      if (!didUsername || !didPassword) {
-        throw new Error(
-          "D-ID is not configured. Provide DID_API_USERNAME + DID_API_PASSWORD from your D-ID Studio key."
-        )
-      }
-
-      // Per D-ID docs, Authorization header is `Basic API_USERNAME:API_PASSWORD` (not base64).
-      const didAuthHeader = `Basic ${didUsername}:${didPassword}`
-
-      const headshotForDid = await didSourceUrlFromHeadshotBuffer(
-        manifest.headshotImageUrl,
-        didAuthHeader
-      )
-      const audioUrlForDid = await didAudioUrlFromBlobUrl(audioUrl, didAuthHeader)
-
-      const createRes = await fetch("https://api.d-id.com/talks", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: didAuthHeader,
-        },
-        body: JSON.stringify({
-          source_url: headshotForDid,
-          script: {
-            type: "audio",
-            audio_url: audioUrlForDid,
-            subtitles: false,
-          },
-          name: manifest.title,
-          config: {
-            result_format: "mp4",
-            // Composites the animated face back onto the full source image (wider shot) instead of a tight face crop.
-            // Some accounts may need stitch permission; set DID_STITCH=false to disable if the API returns 403.
-            ...(process.env.DID_STITCH !== "false" ? { stitch: true } : {}),
-          },
-        }),
-      })
-
-      if (!createRes.ok) {
-        const text = await createRes.text().catch(() => "")
-        throw new Error(
-          `D-ID create talk failed: ${createRes.status} ${createRes.statusText}${text ? ` — ${text}` : ""}`
-        )
-      }
-
-      const createJson = (await createRes.json()) as {
-        id?: string
-        status?: string
-      }
-      const didTalkId = createJson.id
-      if (!didTalkId) throw new Error("D-ID create talk failed: missing id")
-
-      // Poll until done (D-ID typically takes 10-30s)
-      let didStatus = createJson.status ?? "created"
-      let resultUrl: string | undefined
-      const startedAt = Date.now()
-
-      for (let attempt = 0; attempt < 120; attempt++) {
-        if (attempt % 2 === 0) {
-          await updateProgress({
-            progressStep: "Creating talking head (D-ID)…",
-            progressPct: 55,
-            progressDetail: `Polling D-ID… (${attempt + 1})`,
-          })
+        if (!didPassword && didUsername.includes(":")) {
+          const [u, ...rest] = didUsername.split(":")
+          didUsername = u
+          didPassword = rest.join(":")
         }
-        const statusRes = await fetch(`https://api.d-id.com/talks/${didTalkId}`, {
-          method: "GET",
-          headers: {
-            Authorization: didAuthHeader,
-          },
-        })
 
-        if (!statusRes.ok) {
-          const text = await statusRes.text().catch(() => "")
+        if (!didUsername || !didPassword) {
           throw new Error(
-            `D-ID status check failed: ${statusRes.status} ${statusRes.statusText}${text ? ` — ${text}` : ""}`
+            "D-ID is not configured. Provide DID_API_USERNAME + DID_API_PASSWORD from your D-ID Studio key."
           )
         }
 
-        const statusJson = (await statusRes.json()) as {
+        const didAuthHeader = `Basic ${didUsername}:${didPassword}`
+
+        const headshotForDid = await didSourceUrlFromHeadshotBuffer(
+          manifest.headshotImageUrl!,
+          didAuthHeader
+        )
+        const audioUrlForDid = await didAudioUrlFromBlobUrl(audioUrl, didAuthHeader)
+
+        const createRes = await fetch("https://api.d-id.com/talks", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: didAuthHeader,
+          },
+          body: JSON.stringify({
+            source_url: headshotForDid,
+            script: {
+              type: "audio",
+              audio_url: audioUrlForDid,
+              subtitles: false,
+            },
+            name: manifest.title,
+            config: {
+              result_format: "mp4",
+              ...(process.env.DID_STITCH !== "false" ? { stitch: true } : {}),
+            },
+          }),
+        })
+
+        if (!createRes.ok) {
+          const text = await createRes.text().catch(() => "")
+          if (isDidCelebrityDetectedBody(text)) throw new DidCelebrityBlockedError()
+          const friendly = userMessageFromDidErrorBody(createRes.status, text)
+          if (friendly) throw new GenerationUserInputError(friendly)
+          throw new Error(
+            `D-ID create talk failed: ${createRes.status} ${createRes.statusText}${text ? ` — ${text}` : ""}`
+          )
+        }
+
+        const createJson = (await createRes.json()) as {
+          id?: string
           status?: string
-          result_url?: string
-          error_message?: string
-          message?: string
+        }
+        const didTalkId = createJson.id
+        if (!didTalkId) throw new Error("D-ID create talk failed: missing id")
+
+        let didStatus = createJson.status ?? "created"
+        let resultUrl: string | undefined
+        const startedAt = Date.now()
+
+        for (let attempt = 0; attempt < 120; attempt++) {
+          if (attempt % 2 === 0) {
+            await updateProgress({
+              progressStep: "Creating talking head (D-ID)…",
+              progressPct: 55,
+              progressDetail: `Polling D-ID… (${attempt + 1})`,
+            })
+          }
+          const statusRes = await fetch(`https://api.d-id.com/talks/${didTalkId}`, {
+            method: "GET",
+            headers: {
+              Authorization: didAuthHeader,
+            },
+          })
+
+          if (!statusRes.ok) {
+            const text = await statusRes.text().catch(() => "")
+            throw new Error(
+              `D-ID status check failed: ${statusRes.status} ${statusRes.statusText}${text ? ` — ${text}` : ""}`
+            )
+          }
+
+          const statusJson = (await statusRes.json()) as {
+            status?: string
+            result_url?: string
+            error_message?: string
+            message?: string
+          }
+
+          didStatus = statusJson.status ?? didStatus
+          if (didStatus === "done") {
+            resultUrl = statusJson.result_url
+            break
+          }
+          if (didStatus === "error" || didStatus === "rejected") {
+            const blob = JSON.stringify(statusJson)
+            if (isDidCelebrityDetectedBody(blob)) throw new DidCelebrityBlockedError()
+            const em = String(statusJson.error_message ?? statusJson.message ?? "")
+            if (isDidCelebrityDetectedBody(em)) throw new DidCelebrityBlockedError()
+            throw new Error(statusJson.error_message ?? statusJson.message ?? `D-ID failed: ${didStatus}`)
+          }
+
+          if (Date.now() - startedAt > 2 * 60 * 1000) {
+            throw new Error("D-ID talking-head generation timed out")
+          }
+
+          await sleep(2000)
         }
 
-        didStatus = statusJson.status ?? didStatus
-        if (didStatus === "done") {
-          resultUrl = statusJson.result_url
-          break
+        if (!resultUrl) {
+          throw new Error("D-ID talking-head generation completed but no result_url returned")
         }
-        if (didStatus === "error" || didStatus === "rejected") {
-          throw new Error(statusJson.error_message ?? statusJson.message ?? `D-ID failed: ${didStatus}`)
-        }
-
-        // Hard timeout safety net.
-        if (Date.now() - startedAt > 2 * 60 * 1000) {
-          throw new Error("D-ID talking-head generation timed out")
-        }
-
-        await sleep(2000)
+        return resultUrl
       }
 
-      if (!resultUrl) {
-        throw new Error("D-ID talking-head generation completed but no result_url returned")
+      console.time(`[video/generate] d-id:${id}`)
+      try {
+        try {
+          talkingVideoUrl = await runDidTalkingHead()
+        } catch (didErr) {
+          // Explicit D-ID client rejections (non-celebrity) — surface as-is, no backup.
+          if (isGenerationUserInputError(didErr)) throw didErr
+
+          const msg = didErr instanceof Error ? didErr.message : String(didErr)
+          if (msg.includes("D-ID is not configured")) throw didErr
+
+          if (!falKey && !sadTalkerFallbackEnabled) {
+            if (isDidCelebrityBlockedError(didErr)) {
+              throw new GenerationUserInputError(
+                "This headshot was blocked by our primary engine. Add FAL_KEY for automatic backup animation, or set TROLLMAX_SADTALKER_FALLBACK=true with REPLICATE_API_TOKEN, or try another photo."
+              )
+            }
+            throw new GenerationUserInputError(
+              "Our primary talking-head provider failed (including D-ID outages or 500 errors). Set FAL_KEY for fal.ai backup, or TROLLMAX_SADTALKER_FALLBACK=true with REPLICATE_API_TOKEN for Replicate SadTalker, then try again."
+            )
+          }
+
+          const reason = isDidCelebrityBlockedError(didErr) ? "celebrity_block" : "did_error"
+          const didMessage = didErr instanceof Error ? didErr.message : String(didErr)
+
+          await updateProgress({
+            progressStep: "Creating talking head (backup)…",
+            progressPct: 48,
+            progressDetail: null as unknown as undefined,
+          })
+
+          let falErr: unknown
+          if (falKey) {
+            console.warn("[video/generate] D-ID failed, using fal Wav2Lip fallback", {
+              id,
+              reason,
+              message: didMessage,
+            })
+            try {
+              talkingVideoUrl = await falWav2lipTalkingHeadUrl({
+                headshotBlobUrl: manifest.headshotImageUrl!,
+                audioBlobUrl: audioUrl,
+              })
+            } catch (err) {
+              falErr = err
+              console.error("[video/generate] fal Wav2Lip fallback failed:", err)
+            }
+          }
+
+          if (!talkingVideoUrl && sadTalkerFallbackEnabled) {
+            if (falErr) {
+              console.warn("[video/generate] Retrying with Replicate SadTalker after fal failure", {
+                id,
+              })
+            }
+            console.warn("[video/generate] D-ID failed, using Replicate SadTalker fallback", {
+              id,
+              reason,
+              message: didMessage,
+            })
+            try {
+              const rep = new Replicate({ auth: replicateToken! })
+              talkingVideoUrl = await replicateSadTalkerTalkingHeadUrl({
+                replicate: rep,
+                headshotBlobUrl: manifest.headshotImageUrl!,
+                audioBlobUrl: audioUrl,
+              })
+            } catch (repErr) {
+              console.error("[video/generate] SadTalker fallback failed:", repErr)
+              throw new GenerationUserInputError(
+                repErr instanceof Error ? repErr.message : "Backup talking-head generation failed."
+              )
+            }
+          }
+
+          if (!talkingVideoUrl) {
+            const fallbackMsg =
+              falErr instanceof Error ? falErr.message : "Backup talking-head generation failed."
+            throw new GenerationUserInputError(fallbackMsg)
+          }
+        }
+      } finally {
+        console.timeEnd(`[video/generate] d-id:${id}`)
       }
-      talkingVideoUrl = resultUrl
-      console.timeEnd(`[video/generate] d-id:${id}`)
     }
 
-    // Headshot was only needed for D-ID. Delete it immediately — it is no longer
+    // Headshot was only needed for talking-head providers. Delete it immediately — it is no longer
     // referenced by the composed video and should not remain permanently public.
     if (manifest.headshotImageUrl) {
       await getFileStore().delete(manifest.headshotImageUrl).catch((err) => {
@@ -335,7 +439,8 @@ export async function POST(
       manifest.voicePresetId
     )
     const composeOpts = {
-      audioUrl: audioUrlForFetch,
+      // Modal fetches this only when audioBytes is unset (public or non-Vercel URLs).
+      audioUrl: audioBytes ? undefined : audioUrl,
       ...(audioBytes ? { audioBytes } : {}),
       backgroundVideoUrl: getBackgroundAsset(manifest.backgroundVideoId),
       captions,
