@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { NextResponse } from "next/server"
 import {
+  isGenerationCapabilityUnavailableError,
   isGenerationConfigError,
   isGenerationUserInputError,
 } from "@/lib/generation/errors"
@@ -53,6 +54,22 @@ export function jsonGenerationErrorResponse(
         ref,
       },
       { status: 503 }
+    )
+  }
+  if (isGenerationCapabilityUnavailableError(err)) {
+    const msg =
+      err instanceof Error
+        ? err.message
+        : typeof err === "object" && err !== null && "message" in err
+          ? String((err as { message: unknown }).message)
+          : String(err)
+    return NextResponse.json(
+      {
+        error: msg,
+        code: "GENERATION_CAPABILITY_UNAVAILABLE",
+        ref,
+      },
+      { status: 422 }
     )
   }
   if (isGenerationUserInputError(err)) {

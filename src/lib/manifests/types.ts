@@ -53,6 +53,8 @@ export interface SoundboardManifest extends BaseManifest {
   progressDetail?: string
   /** Last error string for UI display. */
   lastError?: string
+  /** Machine-readable failure code for UI styling (e.g. GENERATION_CAPABILITY_UNAVAILABLE). */
+  lastErrorCode?: string
 }
 
 export interface VideoManifest extends BaseManifest {
@@ -93,6 +95,8 @@ export interface VideoManifest extends BaseManifest {
   progressDetail?: string
   /** Last error string for UI display. */
   lastError?: string
+  /** Machine-readable failure code for UI styling (e.g. GENERATION_CAPABILITY_UNAVAILABLE). */
+  lastErrorCode?: string
 }
 
 export interface TakedownRequest {

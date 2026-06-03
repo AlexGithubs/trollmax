@@ -10,7 +10,7 @@ function parseDidJson(bodyText: string): Record<string, unknown> | null {
   return null
 }
 
-/** True when D-ID error payload indicates celebrity/public-figure block (retry with fallback). */
+/** True when D-ID error payload indicates celebrity/public-figure block. */
 export function isDidCelebrityDetectedBody(bodyText: string): boolean {
   const o = parseDidJson(bodyText)
   if (o?.kind === "CelebrityDetectedError") return true
@@ -25,7 +25,7 @@ export function isDidCelebrityDetectedBody(bodyText: string): boolean {
 
 /**
  * Map D-ID API error JSON to a short message we can show users (and store on failed manifests).
- * Does not apply to CelebrityDetectedError (handled via {@link isDidCelebrityDetectedBody} + fallback).
+ * Does not apply to CelebrityDetectedError (handled via {@link isDidCelebrityDetectedBody} + capability-unavailable UX).
  */
 export function userMessageFromDidErrorBody(status: number, bodyText: string): string | null {
   const o = parseDidJson(bodyText)

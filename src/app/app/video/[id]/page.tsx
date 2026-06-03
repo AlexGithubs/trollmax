@@ -131,16 +131,30 @@ export default async function ManageVideoPage({
       )}
 
       {manifest.status === "failed" && (
-        <div className="flex flex-col items-center gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-8 text-center">
-          <AlertCircle className="h-8 w-8 text-destructive" />
-          <p className="text-sm font-medium text-destructive">Generation failed</p>
-          <p className="text-xs text-muted-foreground">
-            Something went wrong. Try creating a new video.
-          </p>
-          <Button asChild size="sm" variant="outline">
-            <Link href="/app/video/new">Try again</Link>
-          </Button>
-        </div>
+        manifest.lastErrorCode === "GENERATION_CAPABILITY_UNAVAILABLE" ? (
+          <div className="flex flex-col items-center gap-3 rounded-xl border border-amber-500/30 bg-amber-500/5 p-8 text-center">
+            <Info className="h-8 w-8 text-amber-600 dark:text-amber-400" />
+            <p className="text-sm font-medium text-amber-800 dark:text-amber-300">Not available yet</p>
+            <p className="text-xs text-muted-foreground">
+              {manifest.lastError ??
+                "We haven't added celebrity face animation yet. Pick a character preset or upload your own photo."}
+            </p>
+            <Button asChild size="sm" variant="outline">
+              <Link href="/app/video/new">Try another face</Link>
+            </Button>
+          </div>
+        ) : (
+          <div className="flex flex-col items-center gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-8 text-center">
+            <AlertCircle className="h-8 w-8 text-destructive" />
+            <p className="text-sm font-medium text-destructive">Generation failed</p>
+            <p className="text-xs text-muted-foreground">
+              {manifest.lastError ?? "Something went wrong. Try creating a new video."}
+            </p>
+            <Button asChild size="sm" variant="outline">
+              <Link href="/app/video/new">Try again</Link>
+            </Button>
+          </div>
+        )
       )}
 
       {manifest.status === "draft" && (

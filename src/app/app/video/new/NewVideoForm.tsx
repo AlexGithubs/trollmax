@@ -8,7 +8,7 @@ import { emitBananaCreditsUpdated } from "@/lib/client/banana-credits-bridge"
 import NextImage from "next/image"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { VideoGeneratingCard } from "@/components/video/VideoGeneratingCard"
+import { VideoGeneratingCard, type VideoGenerationErrorKind } from "@/components/video/VideoGeneratingCard"
 import {
   Mic2,
   ArrowRight,
@@ -141,6 +141,19 @@ const BACKGROUNDS = [
 
 type Stage = "form" | "generating" | "done"
 
+type GenerationFailure = {
+  message: string
+  kind: VideoGenerationErrorKind
+}
+
+function generationErrorKindFromCode(code?: string | null): VideoGenerationErrorKind {
+  return code === "GENERATION_CAPABILITY_UNAVAILABLE" ? "capability_unavailable" : "error"
+}
+
+function throwGenerationFailure(message: string, code?: string | null): never {
+  throw { message, kind: generationErrorKindFromCode(code) } satisfies GenerationFailure
+}
+
 type VoiceKind = "preset" | "board" | "upload"
 
 type VoiceUploadStage = "idle" | "processing" | "uploading" | "uploaded"
@@ -172,6 +185,8 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
 
   const [stage, setStage] = useState<Stage>("form")
   const [error, setError] = useState("")
+  const [generationErrorKind, setGenerationErrorKind] =
+    useState<VideoGenerationErrorKind>("error")
 
   const [progressStep, setProgressStep] = useState<string | null>(null)
   const [progressPct, setProgressPct] = useState<number | null>(null)
@@ -558,6 +573,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
 
   async function handleGenerate() {
     setError("")
+    setGenerationErrorKind("error")
     if (!isSignedIn) {
       openSignIn()
       return
@@ -633,22 +649,29 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
       const createdId = String(created.id)
 
       // Fire generation request but drive UI by polling status.
-      let genHttpError: Error | null = null
+      let genHttpError: GenerationFailure | null = null
       let postGenBananaBalance: number | undefined
       const genPromise = fetch(`/api/video/${createdId}/generate`, { method: "POST" })
         .then(async (r) => {
           const j = await r.json().catch(() => ({}))
           if (!r.ok) {
-            const o = j as { error?: string; detail?: string }
+            const o = j as { error?: string; detail?: string; code?: string }
             const msg = [o.error, o.detail].filter(Boolean).join(" — ")
-            throw new Error(msg || "Generation failed")
+            throwGenerationFailure(msg || "Generation failed", o.code)
           }
           const o = j as { id?: string; bananaCreditsBalance?: number }
           if (typeof o.bananaCreditsBalance === "number") postGenBananaBalance = o.bananaCreditsBalance
           return o
         })
         .catch((e) => {
-          genHttpError = e instanceof Error ? e : new Error(String(e))
+          if (e && typeof e === "object" && "message" in e && "kind" in e) {
+            genHttpError = e as GenerationFailure
+            return
+          }
+          genHttpError = {
+            message: e instanceof Error ? e.message : String(e),
+            kind: "error",
+          }
         })
 
       let completed = false
@@ -663,6 +686,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
               progressPct?: number | null
               progressDetail?: string | null
               lastError?: string | null
+              lastErrorCode?: string | null
             }
           | null
 
@@ -670,12 +694,19 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
           setProgressStep(statusJson.progressStep ?? null)
           setProgressPct(typeof statusJson.progressPct === "number" ? statusJson.progressPct : null)
           setProgressDetail(statusJson.progressDetail ?? null)
-          if (statusJson.lastError) throw new Error(statusJson.lastError)
+          if (statusJson.lastError) {
+            throwGenerationFailure(statusJson.lastError, statusJson.lastErrorCode)
+          }
           if (statusJson.status === "complete") {
             completed = true
             break
           }
-          if (statusJson.status === "failed") throw new Error(statusJson.lastError ?? "Generation failed")
+          if (statusJson.status === "failed") {
+            throwGenerationFailure(
+              statusJson.lastError ?? "Generation failed",
+              statusJson.lastErrorCode
+            )
+          }
         }
 
         await new Promise((r) => setTimeout(r, 1000))
@@ -696,7 +727,14 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
       setStage("done")
       router.push(`/app/video/${createdId}`)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong")
+      if (err && typeof err === "object" && "message" in err && "kind" in err) {
+        const failure = err as GenerationFailure
+        setError(failure.message)
+        setGenerationErrorKind(failure.kind)
+      } else {
+        setError(err instanceof Error ? err.message : "Something went wrong")
+        setGenerationErrorKind("error")
+      }
       setStage("form")
     }
   }
@@ -716,9 +754,16 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
             progressPct={progressPct}
             progressDetail={progressDetail}
             lastError={error || null}
+            errorKind={generationErrorKind}
           />
           {error && (
-            <p className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+            <p
+              className={
+                generationErrorKind === "capability_unavailable"
+                  ? "rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-300"
+                  : "rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+              }
+            >
               {error}
             </p>
           )}
@@ -766,17 +811,15 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
         <CardContent className="pt-5 space-y-4">
           <p className="text-sm font-medium">1. Headshot &amp; layout</p>
           <p className="text-[11px] text-muted-foreground leading-relaxed">
-            Preset portraits are bundled with the app (no live Wikipedia fetch). You confirm you have the
-            rights / consent needed for how you use the output. Upload your own photo instead if you prefer.
-            D-ID may refuse some headshots if their system flags them as a public figure—try another face or
-            your own photo if that happens.
+            Pick a fictional character preset or upload your own front-facing photo. Some face types
+            aren&apos;t supported yet — if that happens, you&apos;ll see a &quot;not available yet&quot; message
+            instead of a hard error. Try another character or your own photo.
           </p>
 
           <div className="space-y-2">
-            <label className="text-xs font-medium text-muted-foreground">Preset headshots</label>
+            <label className="text-xs font-medium text-muted-foreground">Character presets</label>
             <p className="text-[11px] text-muted-foreground">
-              Tap a face — we&apos;ll fetch it and run the same face check as an upload. Name appears under
-              each portrait.
+              Tap a face — we&apos;ll fetch it and run the same face check as an upload.
             </p>
             <div className="max-h-[min(300px,45vh)] overflow-y-auto pr-1">
               <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 sm:gap-3">
@@ -799,10 +842,13 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
                       <img
                         src={thumbSrc}
                         alt=""
-                        className="h-12 w-12 rounded-full border border-border/40 object-cover sm:h-14 sm:w-14"
+                        className="h-12 w-12 rounded-full border border-border/40 object-cover object-[center_22%] sm:h-14 sm:w-14"
                       />
                       <span className="line-clamp-2 text-[10px] font-medium leading-tight sm:text-xs">
                         {p.displayName}
+                      </span>
+                      <span className="line-clamp-2 text-[9px] leading-tight text-muted-foreground sm:text-[10px]">
+                        {p.tagline}
                       </span>
                     </button>
                   )
@@ -830,7 +876,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
                 <img
                   src={headshotPreviewUrl}
                   alt=""
-                  className="h-20 w-20 shrink-0 rounded-lg border border-border/40 bg-secondary/30 object-cover"
+                  className="h-20 w-20 shrink-0 rounded-lg border border-border/40 bg-secondary/30 object-cover object-[center_22%]"
                 />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium" title={headshotName}>
@@ -949,11 +995,13 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
 
             {talkingMode === "half" ? (
               <p className="text-xs text-muted-foreground">
-                The talking head will animate on the top half; the selected background stays on the bottom.
+                Talking head on top, moving gameplay on the bottom — best for longer scripts so the
+                frame never feels frozen.
               </p>
             ) : (
               <p className="text-xs text-muted-foreground">
-                Background is ignored in full-screen mode.
+                Full-screen character only. For scripts over ~30 seconds, top-half + background usually
+                looks more alive.
               </p>
             )}
           </div>
@@ -1501,7 +1549,13 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
       </Card>
 
       {error && (
-        <p className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+        <p
+          className={
+            generationErrorKind === "capability_unavailable"
+              ? "rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-300"
+              : "rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+          }
+        >
           {error}
         </p>
       )}

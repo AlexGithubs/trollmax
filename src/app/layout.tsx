@@ -41,9 +41,10 @@ export default function RootLayout({
 }) {
   return (
     <ClerkProvider appearance={clerkAppearance}>
-      <html lang="en" className="dark">
+      <html lang="en" className="dark" suppressHydrationWarning>
         <body
           className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen bg-background text-foreground`}
+          suppressHydrationWarning
         >
           {children}
         </body>

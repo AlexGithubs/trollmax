@@ -36,5 +36,6 @@ export async function GET(
     progressPct: typeof manifest.progressPct === "number" ? manifest.progressPct : null,
     progressDetail: manifest.progressDetail ?? null,
     lastError: safeLastError,
+    lastErrorCode: manifest.lastErrorCode ?? null,
   })
 }

@@ -228,7 +228,7 @@ async def compose_video(
                     "-i", audio_path,
                     "-filter_complex",
                     _build_video_filter_complex(
-                        body.captions, caption_paths, fit_contain=True, captions_bottom=True
+                        body.captions, caption_paths, fit_contain=True, captions_bottom=True, subtle_zoom=True
                     ) + _full_audio_fc[0],
                     "-map", "[v]",
                     "-map", _full_audio_fc[1],
@@ -396,10 +396,12 @@ def _build_talking_half_filter_complex(
     captions: list[Caption], caption_paths: list[str]
 ) -> str:
     """Stack D-ID talking head (top) over background (bottom), then burn captions.
-    Top: fit + pad (preserve D-ID framing). Bottom: cover + crop (gameplay fills half)."""
+    Top: face crop + subtle zoom (preserve D-ID framing). Bottom: cover + crop (gameplay fills half)."""
     top = (
-        "[0:v]fps=24,scale=1080:960:force_original_aspect_ratio=decrease,"
-        "pad=1080:960:(ow-iw)/2:(oh-ih)/2:black,setsar=1[top]"
+        "[0:v]fps=24,"
+        "scale=600:1066:force_original_aspect_ratio=increase,crop=600:1066,"
+        "zoompan=z='min(pzoom+0.00012,1.06)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s=1080:960:fps=24,"
+        "setsar=1[top]"
     )
     bottom = (
         "[1:v]fps=24,scale=1080:960:force_original_aspect_ratio=increase,"
@@ -425,11 +427,20 @@ def _build_video_filter_complex(
     *,
     fit_contain: bool = False,
     captions_bottom: bool = False,
+    subtle_zoom: bool = False,
 ) -> str:
     """Scale source video to 1080x1920 and draw timed captions.
     fit_contain: scale to fit inside the frame and pad with black (no extra crop zoom). Use for D-ID.
+    subtle_zoom: slow Ken Burns zoom on D-ID output so long scripts feel less frozen.
     Default: cover + center-crop (legacy gameplay full-screen)."""
-    if fit_contain:
+    if fit_contain and subtle_zoom:
+        base = (
+            "[0:v]fps=24,"
+            "scale=1200:2133:force_original_aspect_ratio=increase,crop=1200:2133,"
+            "zoompan=z='min(pzoom+0.0001,1.07)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s=1080x1920:fps=24,"
+            "setsar=1[bg]"
+        )
+    elif fit_contain:
         base = (
             "[0:v]scale=1080:1920:force_original_aspect_ratio=decrease,"
             "pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black,setsar=1[bg]"

@@ -31,11 +31,11 @@ import {
   userMessageFromDidErrorBody,
 } from "@/lib/d-id/user-message-from-did-error"
 import {
+  GenerationCapabilityUnavailableError,
   GenerationUserInputError,
+  isGenerationCapabilityUnavailableError,
   isGenerationUserInputError,
 } from "@/lib/generation/errors"
-import { falWav2lipTalkingHeadUrl } from "@/lib/fal/wav2lip-talking-head"
-import { replicateSadTalkerTalkingHeadUrl } from "@/lib/replicate/sadtalker-talking-head"
 import { jsonGenerationErrorResponse } from "@/lib/security/generation-error"
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -109,6 +109,7 @@ export async function POST(
     progressPct: 0,
     progressDetail: null as unknown as undefined,
     lastError: undefined,
+    lastErrorCode: undefined,
     updatedAt: now,
   }
   await store.set(`video:${id}`, JSON.stringify(processing))
@@ -197,7 +198,7 @@ export async function POST(
       })
     }
 
-    // ── Step 4: D-ID talking head video (fal Wav2Lip backup; optional Replicate SadTalker if env opt-in) ──
+    // ── Step 4: D-ID talking head video ──
     await updateProgress({ progressStep: "Creating talking head (D-ID)…", progressPct: 45 })
     const isMock = process.env.NEXT_PUBLIC_MOCK_MODE === "true"
     let talkingVideoUrl: string | undefined
@@ -209,11 +210,6 @@ export async function POST(
       if (manifest.talkingMode !== "full" && manifest.talkingMode !== "half") {
         throw new Error("Missing/invalid talkingMode in manifest")
       }
-
-      const replicateToken = process.env.REPLICATE_API_TOKEN?.trim()
-      const falKey = process.env.FAL_KEY?.trim()
-      const sadTalkerFallbackEnabled =
-        process.env.TROLLMAX_SADTALKER_FALLBACK === "true" && Boolean(replicateToken)
 
       const runDidTalkingHead = async (): Promise<string> => {
         let didUsername = process.env.DID_API_USERNAME ?? ""
@@ -241,6 +237,13 @@ export async function POST(
         )
         const audioUrlForDid = await didAudioUrlFromBlobUrl(audioUrl, didAuthHeader)
 
+        const didDriverUrl = process.env.DID_DRIVER_URL?.trim() || "bank://lively/driver-06"
+        const motionFactorRaw = process.env.DID_MOTION_FACTOR?.trim()
+        const motionFactor = motionFactorRaw ? Number(motionFactorRaw) : 0.92
+        const didMotionFactor = Number.isFinite(motionFactor)
+          ? Math.min(1, Math.max(0, motionFactor))
+          : 0.92
+
         const createRes = await fetch("https://api.d-id.com/talks", {
           method: "POST",
           headers: {
@@ -249,6 +252,7 @@ export async function POST(
           },
           body: JSON.stringify({
             source_url: headshotForDid,
+            driver_url: didDriverUrl,
             script: {
               type: "audio",
               audio_url: audioUrlForDid,
@@ -257,6 +261,10 @@ export async function POST(
             name: manifest.title,
             config: {
               result_format: "mp4",
+              fluent: true,
+              align_driver: true,
+              auto_match: true,
+              motion_factor: didMotionFactor,
               ...(process.env.DID_STITCH !== "false" ? { stitch: true } : {}),
             },
           }),
@@ -340,85 +348,20 @@ export async function POST(
 
       console.time(`[video/generate] d-id:${id}`)
       try {
-        try {
-          talkingVideoUrl = await runDidTalkingHead()
-        } catch (didErr) {
-          // Explicit D-ID client rejections (non-celebrity) — surface as-is, no backup.
-          if (isGenerationUserInputError(didErr)) throw didErr
+        talkingVideoUrl = await runDidTalkingHead()
+      } catch (didErr) {
+        if (isGenerationUserInputError(didErr)) throw didErr
 
-          const msg = didErr instanceof Error ? didErr.message : String(didErr)
-          if (msg.includes("D-ID is not configured")) throw didErr
+        const msg = didErr instanceof Error ? didErr.message : String(didErr)
+        if (msg.includes("D-ID is not configured")) throw didErr
 
-          if (!falKey && !sadTalkerFallbackEnabled) {
-            if (isDidCelebrityBlockedError(didErr)) {
-              throw new GenerationUserInputError(
-                "This headshot was blocked by our primary engine. Add FAL_KEY for automatic backup animation, or set TROLLMAX_SADTALKER_FALLBACK=true with REPLICATE_API_TOKEN, or try another photo."
-              )
-            }
-            throw new GenerationUserInputError(
-              "Our primary talking-head provider failed (including D-ID outages or 500 errors). Set FAL_KEY for fal.ai backup, or TROLLMAX_SADTALKER_FALLBACK=true with REPLICATE_API_TOKEN for Replicate SadTalker, then try again."
-            )
-          }
-
-          const reason = isDidCelebrityBlockedError(didErr) ? "celebrity_block" : "did_error"
-          const didMessage = didErr instanceof Error ? didErr.message : String(didErr)
-
-          await updateProgress({
-            progressStep: "Creating talking head (backup)…",
-            progressPct: 48,
-            progressDetail: null as unknown as undefined,
-          })
-
-          let falErr: unknown
-          if (falKey) {
-            console.warn("[video/generate] D-ID failed, using fal Wav2Lip fallback", {
-              id,
-              reason,
-              message: didMessage,
-            })
-            try {
-              talkingVideoUrl = await falWav2lipTalkingHeadUrl({
-                headshotBlobUrl: manifest.headshotImageUrl!,
-                audioBlobUrl: audioUrl,
-              })
-            } catch (err) {
-              falErr = err
-              console.error("[video/generate] fal Wav2Lip fallback failed:", err)
-            }
-          }
-
-          if (!talkingVideoUrl && sadTalkerFallbackEnabled) {
-            if (falErr) {
-              console.warn("[video/generate] Retrying with Replicate SadTalker after fal failure", {
-                id,
-              })
-            }
-            console.warn("[video/generate] D-ID failed, using Replicate SadTalker fallback", {
-              id,
-              reason,
-              message: didMessage,
-            })
-            try {
-              const rep = new Replicate({ auth: replicateToken! })
-              talkingVideoUrl = await replicateSadTalkerTalkingHeadUrl({
-                replicate: rep,
-                headshotBlobUrl: manifest.headshotImageUrl!,
-                audioBlobUrl: audioUrl,
-              })
-            } catch (repErr) {
-              console.error("[video/generate] SadTalker fallback failed:", repErr)
-              throw new GenerationUserInputError(
-                repErr instanceof Error ? repErr.message : "Backup talking-head generation failed."
-              )
-            }
-          }
-
-          if (!talkingVideoUrl) {
-            const fallbackMsg =
-              falErr instanceof Error ? falErr.message : "Backup talking-head generation failed."
-            throw new GenerationUserInputError(fallbackMsg)
-          }
+        if (isDidCelebrityBlockedError(didErr)) {
+          throw new GenerationCapabilityUnavailableError()
         }
+
+        throw new GenerationUserInputError(
+          "Talking-head generation failed. Please try again in a few minutes or use a different photo."
+        )
       } finally {
         console.timeEnd(`[video/generate] d-id:${id}`)
       }
@@ -493,6 +436,7 @@ export async function POST(
       progressPct: 100,
       progressDetail: null as unknown as undefined,
       lastError: undefined,
+      lastErrorCode: undefined,
       updatedAt: new Date().toISOString(),
     }
     await store.set(`video:${id}`, JSON.stringify(completed))
@@ -517,6 +461,11 @@ export async function POST(
       progressStep: "Failed",
       progressPct: 100,
       lastError: err instanceof Error ? err.message : String(err),
+      lastErrorCode: isGenerationCapabilityUnavailableError(err)
+        ? "GENERATION_CAPABILITY_UNAVAILABLE"
+        : isGenerationUserInputError(err)
+          ? "GENERATION_USER_INPUT"
+          : undefined,
       updatedAt: new Date().toISOString(),
     }
     await store.set(`video:${id}`, JSON.stringify(failed))
