@@ -12,6 +12,7 @@ import {
 import { canUseTtsTier, getUserEntitlements } from "@/lib/billing/entitlements"
 import { isAllowedUserUploadedAssetUrl } from "@/lib/security/user-media-url"
 import { checkRateLimit } from "@/lib/rate-limit"
+import { backgroundVideoIdForManifest } from "@/lib/video/backgrounds"
 const TtsTierSchema = z.enum(["replicate", "elevenlabs"])
 
 const CreateSchema = z
@@ -175,7 +176,7 @@ export async function POST(req: Request) {
     ...(voicePresetId ? { voicePresetId } : {}),
     ...(soundboardId ? { soundboardId } : {}),
     audioUrl: "",
-    backgroundVideoId,
+    backgroundVideoId: backgroundVideoIdForManifest(talkingMode, backgroundVideoId),
     headshotImageUrl,
     talkingMode,
     captionsEnabled,

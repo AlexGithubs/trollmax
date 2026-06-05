@@ -3,9 +3,13 @@ import type { Caption } from "@/lib/manifests/types"
 
 /**
  * Builds Caption[] from word-level transcript data.
- * Falls back to sentence splitting over 30s if no words are available.
+ * Falls back to script chunks timed across `audioDurationMs` (or 30s) when no words are available.
  */
-export function buildCaptions(words: TranscriptWord[], fallbackScript: string): Caption[] {
+export function buildCaptions(
+  words: TranscriptWord[],
+  fallbackScript: string,
+  audioDurationMs?: number
+): Caption[] {
   const scriptWords = fallbackScript
     .trim()
     .split(/\s+/)
@@ -20,11 +24,11 @@ export function buildCaptions(words: TranscriptWord[], fallbackScript: string): 
       chunks.push(scriptWords.slice(i, i + chunkSize).join(" "))
     }
 
-    // Use transcript end-time when available; otherwise use a sane fixed fallback.
+    // Use transcript end-time when available; otherwise estimate from narration length.
     const totalMs =
       words.length > 0
         ? Math.max(1000, Math.round(words[words.length - 1]!.end * 1000))
-        : 30000
+        : Math.max(1000, audioDurationMs ?? 30000)
 
     const totalChunkWords = chunks.reduce(
       (sum, c) => sum + c.split(/\s+/).filter(Boolean).length,

@@ -8,6 +8,7 @@ import type { SoundboardManifest, VideoManifest } from "@/lib/manifests/types"
 import { VideoPlayer } from "@/components/video/VideoPlayer"
 import { ShareMenu } from "@/components/share/ShareMenu"
 import { DeleteVideoButton } from "@/components/video/DeleteVideoButton"
+import { formatVideoListSubtitle, formatBackgroundForDisplay } from "@/lib/video/backgrounds"
 import { getSiteBaseUrl } from "@/lib/site-url"
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
@@ -64,7 +65,7 @@ export default async function ManageVideoPage({
         </Button>
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-xl font-bold tracking-tight">{manifest.title}</h1>
-          <p className="text-xs text-muted-foreground">{manifest.backgroundVideoId}</p>
+          <p className="text-xs text-muted-foreground">{formatVideoListSubtitle(manifest)}</p>
         </div>
         {manifest.status === "complete" && manifest.videoUrl ? (
           <ShareMenu shareUrl={shareUrl} kind="video" className="shrink-0" />
@@ -99,7 +100,10 @@ export default async function ManageVideoPage({
             </span>
           </p>
           <p>
-            Background: <span className="text-foreground">{manifest.backgroundVideoId}</span>
+            Background:{" "}
+            <span className="text-foreground">
+              {formatBackgroundForDisplay(manifest.talkingMode, manifest.backgroundVideoId)}
+            </span>
           </p>
           <p>
             Layout:{" "}

@@ -124,20 +124,11 @@ function loadImageElement(src: string): Promise<HTMLImageElement> {
   })
 }
 
-const BACKGROUNDS = [
-  {
-    id: "minecraft",
-    label: "Minecraft",
-    color: "#2d5a1b",
-    description: "Forest green gameplay",
-  },
-  {
-    id: "subway-surfers",
-    label: "Subway Surfers",
-    color: "#e8721a",
-    description: "Orange runner background",
-  },
-]
+import {
+  BACKGROUND_OPTIONS,
+  backgroundVideoIdForManifest,
+  formatBackgroundForDisplay,
+} from "@/lib/video/backgrounds"
 
 type Stage = "form" | "generating" | "done"
 
@@ -217,7 +208,6 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
   const [backgroundVideoId, setBackgroundVideoId] = useState("minecraft")
   const selectedPreset = presets.find((p) => p.id === selectedPresetId)
   const selectedBoard = boards.find((b) => b.id === selectedBoardId)
-  const selectedBackground = BACKGROUNDS.find((b) => b.id === backgroundVideoId)
 
   useEffect(() => {
     fetch("/api/tts-availability")
@@ -609,7 +599,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
       const sharedFields = {
         title: videoTitle.trim(),
         script: script.trim(),
-        backgroundVideoId,
+        backgroundVideoId: backgroundVideoIdForManifest(talkingMode, backgroundVideoId),
         headshotImageUrl,
         talkingMode,
         captionsEnabled,
@@ -1388,7 +1378,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
           <p className="text-sm font-medium">4. Background</p>
           {talkingMode === "half" ? (
             <div className="grid grid-cols-2 gap-3">
-              {BACKGROUNDS.map((bg) => (
+              {BACKGROUND_OPTIONS.map((bg) => (
                 <button
                   key={bg.id}
                   onClick={() => setBackgroundVideoId(bg.id)}
@@ -1529,7 +1519,10 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
               </span>
             </p>
             <p>
-              Background: <span className="text-foreground">{selectedBackground?.label ?? backgroundVideoId}</span>
+              Background:{" "}
+              <span className="text-foreground">
+                {formatBackgroundForDisplay(talkingMode, backgroundVideoId)}
+              </span>
             </p>
             <p>
               Layout:{" "}

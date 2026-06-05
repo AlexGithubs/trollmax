@@ -28,6 +28,9 @@ export function isDidCelebrityDetectedBody(bodyText: string): boolean {
  * Does not apply to CelebrityDetectedError (handled via {@link isDidCelebrityDetectedBody} + capability-unavailable UX).
  */
 export function userMessageFromDidErrorBody(status: number, bodyText: string): string | null {
+  if (status === 401) {
+    return "D-ID rejected the API credentials. Check DID_API_USERNAME and DID_API_PASSWORD in your environment."
+  }
   const o = parseDidJson(bodyText)
   if (!o) return null
   if (o.kind === "CelebrityDetectedError") return null
@@ -36,4 +39,15 @@ export function userMessageFromDidErrorBody(status: number, bodyText: string): s
     return `D-ID rejected the image: ${description.trim()}`
   }
   return null
+}
+
+/** User-facing copy for thrown D-ID pipeline errors (timeouts, poll failures, etc.). */
+export function userMessageFromDidFailure(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err)
+  if (msg.includes("timed out")) {
+    return "D-ID is taking longer than usual. Try again in a minute — if it keeps failing, try a different character."
+  }
+  if (msg.includes("D-ID rejected the image:")) return msg
+  if (msg.startsWith("D-ID ") && msg.length <= 220) return msg
+  return "Talking-head generation failed. Please try again in a few minutes or use a different photo."
 }

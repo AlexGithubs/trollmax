@@ -5,16 +5,16 @@ Accepts audio + background type + captions, renders a 9:16 MP4 with
 burned-in captions using FFmpeg, and returns raw MP4 bytes.
 
 D-ID talking-head (when talkingVideoUrl is set):
-  - talkingMode full (default): D-ID scaled to 1080x1920 + timed captions + TTS (no gameplay asset).
-  - talkingMode half: top 960px D-ID, bottom 960px gameplay or solid color + captions + TTS.
+  - talkingMode full (default): D-ID padded to 886×1575 inside 1080×1920 canvas.
+  - talkingMode half: top 960px D-ID, bottom 960px gameplay or solid color.
 
 Backgrounds (half bottom, or legacy compose without D-ID):
-  - asset:minecraft => bundled gameplay clip in modal/assets/minecraft-source.mp4
+  - asset:minecraft     => bundled gameplay clip in modal/assets/minecraft-source.mp4
   - asset:subway-surfers => bundled gameplay clip in modal/assets/subway-source.mp4
-  - fallback to solid color only if no supported background asset is provided.
+  - fallback to solid color if no supported background asset is provided.
 
 Deploy:
-  modal deploy modal/video_composer.py
+  python3 -m modal deploy modal/video_composer.py
 
 Then copy the deployed URL and set:
   MODAL_FFMPEG_URL=<url>
@@ -22,6 +22,7 @@ Then copy the deployed URL and set:
   MODAL_TOKEN_SECRET=<token_secret>
 """
 
+import asyncio
 import base64
 import os
 import secrets
@@ -110,7 +111,6 @@ async def compose_video(
     import httpx
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        # Download audio
         audio_path = os.path.join(tmpdir, "audio.mp3")
         talking_video_path: Optional[str] = None
         if body.talkingVideoUrl:
@@ -119,13 +119,12 @@ async def compose_video(
         if not body.audioBase64 and not body.audioUrl:
             raise HTTPException(status_code=400, detail="Either audioUrl or audioBase64 must be provided")
 
-        # Write audio — inline bytes take priority over URL (avoids 403 on private blobs).
-        if body.audioBase64:
-            with open(audio_path, "wb") as f:
-                f.write(base64.b64decode(body.audioBase64))
-        else:
-            # Use a long timeout — audio files can be several MB.
-            async with httpx.AsyncClient(timeout=httpx.Timeout(180.0)) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as client:
+            async def fetch_audio() -> None:
+                if body.audioBase64:
+                    with open(audio_path, "wb") as f:
+                        f.write(base64.b64decode(body.audioBase64))
+                    return
                 try:
                     r = await client.get(body.audioUrl, follow_redirects=True)
                     r.raise_for_status()
@@ -134,9 +133,9 @@ async def compose_video(
                 with open(audio_path, "wb") as f:
                     f.write(r.content)
 
-        # Use a long timeout — D-ID talking-head MP4s can be 10-50 MB and take >30s on Modal cold start.
-        async with httpx.AsyncClient(timeout=httpx.Timeout(180.0)) as client:
-            if talking_video_path:
+            async def fetch_talking() -> None:
+                if not talking_video_path:
+                    return
                 try:
                     r2 = await client.get(body.talkingVideoUrl, follow_redirects=True)
                     r2.raise_for_status()
@@ -145,34 +144,28 @@ async def compose_video(
                 with open(talking_video_path, "wb") as f:
                     f.write(r2.content)
 
-        output_path = os.path.join(tmpdir, "output.mp4")
+            if talking_video_path:
+                await asyncio.gather(fetch_audio(), fetch_talking())
+            else:
+                await fetch_audio()
 
+        output_path = os.path.join(tmpdir, "output.mp4")
         vol = body.voiceVolumeMultiplier or 1.0
         caption_paths = _write_caption_text_files(tmpdir, body.captions)
 
-        # Only "half" splits the frame (talking head top, gameplay bottom). Anything else is full-frame talking head.
+        # "half" splits the frame (talking head top, gameplay bottom).
+        # Everything else is full-frame talking head.
         is_half_layout = (body.talkingMode or "full").lower().strip() == "half"
 
-        # Full-page talking head: only D-ID + TTS + captions — never load gameplay assets.
-        # Half-page: need bottom-half source (gameplay clip or solid color fallback).
-        # Legacy (no D-ID): background gameplay or solid color + TTS + captions.
-        if talking_video_path:
-            background_clip = (
-                _resolve_background_clip(body.backgroundAsset) if is_half_layout else None
-            )
-        else:
-            background_clip = _resolve_background_clip(body.backgroundAsset)
-
-        # Returned to Next.js so we can detect stale Modal deployments that ignore talkingVideoUrl.
         compose_mode: str
 
-        # If we have a D-ID talking-head MP4, it becomes the main visual.
         if talking_video_path:
             if is_half_layout:
+                # ── Half layout: talking head top half, background bottom half ──────
                 bg_color = BG_COLORS.get(body.backgroundType or "", BG_COLORS["default"])
+                background_clip = _resolve_background_clip(body.backgroundAsset)
+                audio_fc = _build_audio_volume_filter(vol, audio_input_idx=2)
 
-                # Audio input index is 2 (0=talking, 1=background, 2=audio).
-                _half_audio_fc = _build_half_audio_volume(vol, audio_input_idx=2)
                 if background_clip:
                     compose_mode = "talking-half-gameplay"
                     ffmpeg_cmd = [
@@ -181,19 +174,11 @@ async def compose_video(
                         "-stream_loop", "-1", "-i", background_clip,
                         "-i", audio_path,
                         "-filter_complex",
-                        _build_talking_half_filter_complex(body.captions, caption_paths)
-                        + _half_audio_fc[0],
-                        "-map", "[v]",
-                        "-map", _half_audio_fc[1],
-                        "-c:v", "libx264",
-                        "-r", "24",
-                        "-preset", "veryfast",
-                        "-crf", "25",
-                        "-c:a", "aac",
-                        "-b:a", "128k",
-                        "-movflags", "+faststart",
-                        "-shortest",
-                        output_path,
+                        _build_talking_half_filter(body.captions, caption_paths) + audio_fc[0],
+                        "-map", "[v]", "-map", audio_fc[1],
+                        "-c:v", "libx264", "-r", "24", "-preset", "fast", "-crf", "20",
+                        "-c:a", "aac", "-b:a", "192k",
+                        "-movflags", "+faststart", "-shortest", output_path,
                     ]
                 else:
                     compose_mode = "talking-half-solid"
@@ -203,99 +188,64 @@ async def compose_video(
                         "-f", "lavfi", "-i", f"color=c={bg_color}:s=1080x960:r=30",
                         "-i", audio_path,
                         "-filter_complex",
-                        _build_talking_half_filter_complex(body.captions, caption_paths)
-                        + _half_audio_fc[0],
-                        "-map", "[v]",
-                        "-map", _half_audio_fc[1],
-                        "-c:v", "libx264",
-                        "-r", "24",
-                        "-preset", "veryfast",
-                        "-crf", "25",
-                        "-c:a", "aac",
-                        "-b:a", "128k",
-                        "-movflags", "+faststart",
-                        "-shortest",
-                        output_path,
+                        _build_talking_half_filter(body.captions, caption_paths) + audio_fc[0],
+                        "-map", "[v]", "-map", audio_fc[1],
+                        "-c:v", "libx264", "-r", "24", "-preset", "fast", "-crf", "20",
+                        "-c:a", "aac", "-b:a", "192k",
+                        "-movflags", "+faststart", "-shortest", output_path,
                     ]
             else:
+                # ── Full layout: talking head padded to 1080×1920 canvas ─────────
                 compose_mode = "talking-full"
-                # Audio input index is 1 (0=talking video, 1=audio).
-                _full_audio_fc = _build_half_audio_volume(vol, audio_input_idx=1)
-                # Full-screen: talking head takes over the full frame.
+                audio_fc = _build_audio_volume_filter(vol, audio_input_idx=1)
                 ffmpeg_cmd = [
                     "ffmpeg", "-y",
                     "-i", talking_video_path,
                     "-i", audio_path,
                     "-filter_complex",
-                    _build_video_filter_complex(
-                        body.captions, caption_paths, fit_contain=True, captions_bottom=True, subtle_zoom=True
-                    ) + _full_audio_fc[0],
-                    "-map", "[v]",
-                    "-map", _full_audio_fc[1],
-                    "-c:v", "libx264",
-                    "-preset", "fast",
-                    "-crf", "23",
-                    "-c:a", "aac",
-                    "-b:a", "128k",
-                    "-movflags", "+faststart",
-                    "-shortest",
-                    output_path,
+                    _build_talking_full_filter(body.captions, caption_paths) + audio_fc[0],
+                    "-map", "[v]", "-map", audio_fc[1],
+                    "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+                    "-c:a", "aac", "-b:a", "192k",
+                    "-movflags", "+faststart", "-shortest", output_path,
                 ]
 
-        elif background_clip:
-            compose_mode = "background-gameplay"
-            _bg_audio_fc = _build_half_audio_volume(vol, audio_input_idx=1)
-            ffmpeg_cmd = [
-                "ffmpeg", "-y",
-                "-stream_loop", "-1", "-i", background_clip,
-                "-i", audio_path,
-                "-filter_complex",
-                _build_video_filter_complex(body.captions, caption_paths, fit_contain=False)
-                + _bg_audio_fc[0],
-                "-map", "[v]",
-                "-map", _bg_audio_fc[1],
-                "-c:v", "libx264",
-                "-preset", "fast",
-                "-crf", "23",
-                "-c:a", "aac",
-                "-b:a", "128k",
-                "-movflags", "+faststart",
-                "-shortest",
-                output_path,
-            ]
         else:
-            compose_mode = "solid-color"
-            bg_color = BG_COLORS.get(body.backgroundType or "", BG_COLORS["default"])
-            _solid_audio_fc = _build_half_audio_volume(vol, audio_input_idx=1)
-            ffmpeg_cmd = [
-                "ffmpeg", "-y",
-                "-f", "lavfi", "-i", f"color=c={bg_color}:s=1080x1920:r=30",
-                "-i", audio_path,
-                "-filter_complex",
-                _build_color_filter_complex(bg_color, body.captions, caption_paths)
-                + _solid_audio_fc[0],
-                "-map", "[v]",
-                "-map", _solid_audio_fc[1],
-                "-c:v", "libx264",
-                "-preset", "fast",
-                "-crf", "28",
-                "-c:a", "aac",
-                "-b:a", "128k",
-                "-movflags", "+faststart",
-                "-shortest",
-                output_path,
-            ]
+            # ── No talking head: background gameplay or solid color ───────────────
+            background_clip = _resolve_background_clip(body.backgroundAsset)
+            audio_fc = _build_audio_volume_filter(vol, audio_input_idx=1)
 
-        result = subprocess.run(
-            ffmpeg_cmd,
-            capture_output=True,
-            text=True,
-        )
+            if background_clip:
+                compose_mode = "background-gameplay"
+                ffmpeg_cmd = [
+                    "ffmpeg", "-y",
+                    "-stream_loop", "-1", "-i", background_clip,
+                    "-i", audio_path,
+                    "-filter_complex",
+                    _build_background_filter(body.captions, caption_paths) + audio_fc[0],
+                    "-map", "[v]", "-map", audio_fc[1],
+                    "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+                    "-c:a", "aac", "-b:a", "192k",
+                    "-movflags", "+faststart", "-shortest", output_path,
+                ]
+            else:
+                compose_mode = "solid-color"
+                bg_color = BG_COLORS.get(body.backgroundType or "", BG_COLORS["default"])
+                ffmpeg_cmd = [
+                    "ffmpeg", "-y",
+                    "-f", "lavfi", "-i", f"color=c={bg_color}:s=1080x1920:r=30",
+                    "-i", audio_path,
+                    "-filter_complex",
+                    _build_solid_color_filter(bg_color, body.captions, caption_paths) + audio_fc[0],
+                    "-map", "[v]", "-map", audio_fc[1],
+                    "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+                    "-c:a", "aac", "-b:a", "192k",
+                    "-movflags", "+faststart", "-shortest", output_path,
+                ]
+
+        result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
         if result.returncode != 0:
-            raise HTTPException(
-                status_code=500,
-                detail=f"FFmpeg failed: {result.stderr[-500:]}"
-            )
+            raise HTTPException(status_code=500, detail=f"FFmpeg failed: {result.stderr[-500:]}")
 
         with open(output_path, "rb") as f:
             mp4_bytes = f.read()
@@ -307,32 +257,28 @@ async def compose_video(
     )
 
 
-def _resolve_background_clip(background_asset: Optional[str]) -> Optional[str]:
-    if not background_asset:
-        return None
+# ── Helpers ──────────────────────────────────────────────────────────────────
 
+def _resolve_background_clip(background_asset: Optional[str]) -> Optional[str]:
     if background_asset == "asset:minecraft":
         return "/root/assets/minecraft-source.mp4"
     if background_asset == "asset:subway-surfers":
         return "/root/assets/subway-source.mp4"
-
     return None
 
 
-# TikTok-style Reddit story captions: bold sans, white fill, heavy black outline, centered.
+# Caption styling constants
 _CAPTION_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-_CAPTION_FONTSIZE = 78
-_CAPTION_BORDERW = 10
+_CAPTION_FONTSIZE = 88
+_CAPTION_BORDERW = 8
 
 
 def _caption_display_text(text: str) -> str:
     return text.strip().lower()
 
 
-def _write_caption_text_files(
-    tmpdir: str, captions: list[Caption]
-) -> list[str]:
-    """Write one UTF-8 file per caption so drawtext can use textfile= (avoids filter escaping for quotes, etc.)."""
+def _write_caption_text_files(tmpdir: str, captions: list[Caption]) -> list[str]:
+    """Write one UTF-8 file per caption so drawtext can use textfile= (avoids shell-escaping issues)."""
     paths: list[str] = []
     for i, cap in enumerate(captions):
         p = os.path.join(tmpdir, f"caption_{i}.txt")
@@ -342,10 +288,8 @@ def _write_caption_text_files(
     return paths
 
 
-def _drawtext_caption(
-    textfile_path: str, start_s: float, end_s: float, *, y_expr: str = "(h-text_h)/2"
-) -> str:
-    # Paths from tempfile are safe for filter syntax; no spaces/colons on Linux tmp.
+def _drawtext(textfile_path: str, start_s: float, end_s: float, *, y_expr: str) -> str:
+    """Single timed drawtext filter clause."""
     return (
         f"drawtext=fontfile={_CAPTION_FONT}"
         f":textfile={textfile_path}"
@@ -353,110 +297,88 @@ def _drawtext_caption(
         f":fontcolor=white"
         f":borderw={_CAPTION_BORDERW}"
         f":bordercolor=black"
+        f":shadowcolor=black:shadowx=2:shadowy=2"
         f":x=(w-text_w)/2"
         f":y={y_expr}"
-        # Quote the whole expr so commas are not treated as filter-chain separators.
         f":enable='between(t,{start_s:.3f},{end_s:.3f})'"
     )
 
 
-def _build_color_filter_complex(
-    bg_color: str, captions: list[Caption], caption_paths: list[str]
+def _caption_drawtext_chain(
+    captions: list[Caption], paths: list[str], *, y_expr: str
 ) -> str:
-    """Build FFmpeg filter_complex string with drawtext overlays."""
-    if not captions:
-        return f"color=c={bg_color}:s=1080x1920:r=30[v]"
-
-    drawtext_parts = []
-    for cap, path in zip(captions, caption_paths):
-        start_s = cap.startMs / 1000.0
-        end_s = cap.endMs / 1000.0
-        drawtext_parts.append(_drawtext_caption(path, start_s, end_s))
-
-    filters = ",".join(drawtext_parts)
-    return f"color=c={bg_color}:s=1080x1920:r=30[bg];[bg]{filters}[v]"
+    """Comma-joined drawtext clauses for all captions."""
+    return ",".join(
+        _drawtext(path, cap.startMs / 1000.0, cap.endMs / 1000.0, y_expr=y_expr)
+        for cap, path in zip(captions, paths)
+    )
 
 
-def _build_half_audio_volume(vol: float, audio_input_idx: int) -> tuple[str, str]:
-    """Return (filter_complex_suffix, map_ref) for audio in a filter_complex context.
+def _build_audio_volume_filter(vol: float, audio_input_idx: int) -> tuple[str, str]:
+    """Return (filter_complex_suffix, map_ref) for audio volume control.
 
-    When vol != 1.0 the audio is routed through a volume filter inside the
-    filter_complex graph. When vol == 1.0 the audio stream is mapped directly.
-
-    Returns a tuple of:
-      - str: the filter_complex suffix to append (leading semicolon included, or empty)
-      - str: the -map argument to use for the audio output stream
+    When vol == 1.0 the stream is mapped directly (no filter needed).
+    When vol != 1.0 a volume filter is injected into the filter_complex graph.
     """
     if abs(vol - 1.0) < 1e-6:
         return "", f"{audio_input_idx}:a"
     return f";[{audio_input_idx}:a]volume={vol:.6f}[outa]", "[outa]"
 
 
-def _build_talking_half_filter_complex(
-    captions: list[Caption], caption_paths: list[str]
-) -> str:
-    """Stack D-ID talking head (top) over background (bottom), then burn captions.
-    Top: face crop + subtle zoom (preserve D-ID framing). Bottom: cover + crop (gameplay fills half)."""
+# ── Filter builders ───────────────────────────────────────────────────────────
+
+def _build_talking_full_filter(captions: list[Caption], paths: list[str]) -> str:
+    """Full-mode talking head: scale to fill 1080×1920, captions at bottom.
+
+    HeyGen outputs a true 9:16 portrait at 1080p with no internal face-zoom,
+    so we scale to fill the full canvas. The pad step is a no-op for a perfect
+    9:16 source but harmlessly centres any slightly off-ratio input.
+    """
+    base = (
+        "[0:v]scale=1080:1920:force_original_aspect_ratio=decrease,"
+        "pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black,setsar=1[bg]"
+    )
+    if not captions:
+        return f"{base};[bg]copy[v]"
+    chain = _caption_drawtext_chain(captions, paths, y_expr="h-text_h-160")
+    return f"{base};[bg]{chain}[v]"
+
+
+def _build_talking_half_filter(captions: list[Caption], paths: list[str]) -> str:
+    """Half-mode D-ID: talking head fills top 960px, background fills bottom 960px."""
     top = (
         "[0:v]fps=24,"
-        "scale=600:1066:force_original_aspect_ratio=increase,crop=600:1066,"
-        "zoompan=z='min(pzoom+0.00012,1.06)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s=1080:960:fps=24,"
-        "setsar=1[top]"
+        "scale=886:788:force_original_aspect_ratio=decrease,"
+        "pad=1080:960:(ow-iw)/2:(oh-ih)/2:black,setsar=1[top]"
     )
     bottom = (
         "[1:v]fps=24,scale=1080:960:force_original_aspect_ratio=increase,"
         "crop=1080:960,setsar=1[bottom]"
     )
     stacked = "[top][bottom]vstack=inputs=2[bg]"
-
     if not captions:
         return f"{top};{bottom};{stacked};[bg]copy[v]"
-
-    parts: list[str] = []
-    for cap, path in zip(captions, caption_paths):
-        start_s = cap.startMs / 1000.0
-        end_s = cap.endMs / 1000.0
-        parts.append(_drawtext_caption(path, start_s, end_s))
-
-    return f"{top};{bottom};{stacked};[bg]{','.join(parts)}[v]"
+    chain = _caption_drawtext_chain(captions, paths, y_expr="(h-text_h)/2")
+    return f"{top};{bottom};{stacked};[bg]{chain}[v]"
 
 
-def _build_video_filter_complex(
-    captions: list[Caption],
-    caption_paths: list[str],
-    *,
-    fit_contain: bool = False,
-    captions_bottom: bool = False,
-    subtle_zoom: bool = False,
-) -> str:
-    """Scale source video to 1080x1920 and draw timed captions.
-    fit_contain: scale to fit inside the frame and pad with black (no extra crop zoom). Use for D-ID.
-    subtle_zoom: slow Ken Burns zoom on D-ID output so long scripts feel less frozen.
-    Default: cover + center-crop (legacy gameplay full-screen)."""
-    if fit_contain and subtle_zoom:
-        base = (
-            "[0:v]fps=24,"
-            "scale=1200:2133:force_original_aspect_ratio=increase,crop=1200:2133,"
-            "zoompan=z='min(pzoom+0.0001,1.07)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s=1080x1920:fps=24,"
-            "setsar=1[bg]"
-        )
-    elif fit_contain:
-        base = (
-            "[0:v]scale=1080:1920:force_original_aspect_ratio=decrease,"
-            "pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black,setsar=1[bg]"
-        )
-    else:
-        base = "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1[bg]"
+def _build_background_filter(captions: list[Caption], paths: list[str]) -> str:
+    """Gameplay-only mode: fill-crop source to 1080×1920, captions centered."""
+    base = "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1[bg]"
     if not captions:
         return f"{base};[bg]copy[v]"
+    chain = _caption_drawtext_chain(captions, paths, y_expr="(h-text_h)/2")
+    return f"{base};[bg]{chain}[v]"
 
-    parts: list[str] = []
-    y_expr = "h-text_h-120" if captions_bottom else "(h-text_h)/2"
-    for cap, path in zip(captions, caption_paths):
-        start_s = cap.startMs / 1000.0
-        end_s = cap.endMs / 1000.0
-        parts.append(_drawtext_caption(path, start_s, end_s, y_expr=y_expr))
-    return f"{base};[bg]{','.join(parts)}[v]"
+
+def _build_solid_color_filter(
+    bg_color: str, captions: list[Caption], paths: list[str]
+) -> str:
+    """Solid color background with captions centered."""
+    if not captions:
+        return f"color=c={bg_color}:s=1080x1920:r=30[v]"
+    chain = _caption_drawtext_chain(captions, paths, y_expr="(h-text_h)/2")
+    return f"color=c={bg_color}:s=1080x1920:r=30[bg];[bg]{chain}[v]"
 
 
 @app.function(image=image, timeout=600)

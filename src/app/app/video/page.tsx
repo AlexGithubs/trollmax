@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { GuestMediaEmptyCtas } from "@/components/layout/GuestMediaEmptyCtas"
 import { Video, Plus, Share2 } from "lucide-react"
 import type { VideoManifest } from "@/lib/manifests/types"
+import { formatVideoListSubtitle } from "@/lib/video/backgrounds"
 import { DeleteVideoButton } from "@/components/video/DeleteVideoButton"
 
 export const metadata = { title: "Videos — TROLLMAX" }
@@ -102,7 +103,7 @@ export default async function VideoListPage() {
                         {video.title}
                       </Link>
                       <p className="truncate text-xs text-muted-foreground">
-                        {video.backgroundVideoId}
+                        {formatVideoListSubtitle(video)}
                       </p>
                     </div>
                     <span

@@ -2,18 +2,16 @@ export const maxDuration = 300
 
 import { NextResponse } from "next/server"
 import { currentUser } from "@clerk/nextjs/server"
-import Replicate from "replicate"
 import { getManifestStore, getFileStore } from "@/lib/storage"
 import { downloadBlobBuffer, isPrivateVercelBlobUrl } from "@/lib/storage/blob"
-import { urlForReplicateModelInput } from "@/lib/replicate/url-for-model-input"
-import { didAudioUrlFromBlobUrl } from "@/lib/d-id/upload-audio-for-talk"
-import { didSourceUrlFromHeadshotBuffer } from "@/lib/d-id/upload-headshot-for-talk"
+import { runDidTalkingHead } from "@/lib/d-id/run-did-talking-head"
+import { runHeygenTalkingHead } from "@/lib/heygen/run-heygen-talking-head"
+import { userMessageFromHeygenFailure } from "@/lib/heygen/user-message-from-heygen-error"
 import { getVideoComposer } from "@/lib/providers"
 import { resolveVideoVoiceForGenerate } from "@/lib/tts/resolve-voice-for-generate"
 import { checkRateLimit } from "@/lib/rate-limit"
-import { parseWhisperXWords } from "@/lib/audio/match-phrases"
-import type { TranscriptWord } from "@/lib/audio/match-phrases"
 import { buildCaptions } from "@/lib/video/captions"
+import { transcribeForCaptions } from "@/lib/video/transcribe-for-captions"
 import { getBackgroundAsset } from "@/lib/video/backgrounds"
 import { normalizeTextForTTS } from "@/lib/text/tts-normalize"
 import type { VideoManifest } from "@/lib/manifests/types"
@@ -25,11 +23,9 @@ import {
   creditBananaCredits,
 } from "@/lib/billing/banana-credits"
 import { videoGenerationCostBananaCredits } from "@/lib/billing/video-generation-cost"
-import { DidCelebrityBlockedError, isDidCelebrityBlockedError } from "@/lib/d-id/did-celebrity-error"
-import {
-  isDidCelebrityDetectedBody,
-  userMessageFromDidErrorBody,
-} from "@/lib/d-id/user-message-from-did-error"
+import { isDidCelebrityBlockedError } from "@/lib/d-id/did-celebrity-error"
+import { isHeygenCelebrityBlockedError } from "@/lib/heygen/heygen-celebrity-error"
+import { userMessageFromDidFailure } from "@/lib/d-id/user-message-from-did-error"
 import {
   GenerationCapabilityUnavailableError,
   GenerationUserInputError,
@@ -44,6 +40,16 @@ const MODAL_TIMEOUT_RE = /modal ffmpeg request failed:\s*500[\s\S]*function exec
 function isModalComposeTimeout(err: unknown): boolean {
   if (!(err instanceof Error)) return false
   return MODAL_TIMEOUT_RE.test(err.message)
+}
+
+/**
+ * Selects the talking-head provider based on TALKING_HEAD_PROVIDER env var.
+ * Defaults to "did" when unset so the existing D-ID path is unchanged.
+ * Set TALKING_HEAD_PROVIDER=heygen to route through HeyGen instead.
+ */
+function getTalkingHeadProvider(): "heygen" | "did" {
+  const val = process.env.TALKING_HEAD_PROVIDER?.trim().toLowerCase()
+  return val === "heygen" ? "heygen" : "did"
 }
 
 export async function POST(
@@ -130,6 +136,7 @@ export async function POST(
   const balanceAfterDebit = debit.balance
 
   try {
+    console.time(`[video/generate] pipeline:${id}`)
     const updateProgress = async (patch: Partial<VideoManifest>) => {
       const raw2 = await store.get(`video:${id}`)
       if (!raw2) return
@@ -147,11 +154,12 @@ export async function POST(
     }
     const synth = await resolveVideoVoiceForGenerate(manifestForTts, persist)
     const scriptForSpeech = normalizeTextForTTS(manifestForTts.script)
-    const { audioUrl } = await synth.provider.synthesize({
+    const { audioUrl, durationSeconds } = await synth.provider.synthesize({
       voiceId: synth.voiceId,
       text: scriptForSpeech,
       ...(synth.refText ? { refText: synth.refText } : {}),
     })
+    const audioDurationMs = Math.max(1000, Math.round(durationSeconds * 1000))
     // Pre-download audio bytes when the blob is private so Modal doesn't need to fetch
     // the blob URL itself (private Vercel blobs require auth; Modal has no token).
     let audioBytes: Buffer | undefined
@@ -162,48 +170,22 @@ export async function POST(
 
     const captionsEnabled = manifest.captionsEnabled !== false
     let captions = [] as VideoManifest["captions"]
-    if (captionsEnabled) {
-      // ── Step 2: Whisper — word-level timestamps (non-fatal) ─────────────────
-      await updateProgress({ progressStep: "Running speech transcription…", progressPct: 25 })
-      let transcriptWords: TranscriptWord[] = []
-      if (process.env.REPLICATE_API_TOKEN) {
-        try {
-          const replicate = new Replicate({ auth: process.env.REPLICATE_API_TOKEN })
-          const whisperFileUrl = await urlForReplicateModelInput(replicate, audioUrl, {
-            filenameStem: "whisper_audio",
-          })
-          const result = await replicate.run(
-            "thomasmol/whisper-diarization:1495a9cddc83b2203b0d8d3516e38b80fd1572ebc4bc5700ac1da56a9b3ed886",
-            {
-              input: {
-                file_url: whisperFileUrl,
-                language: "en",
-              },
-            }
-          )
-          transcriptWords = parseWhisperXWords(result)
-          console.log(`[video/generate] Transcription found ${transcriptWords.length} words`)
-        } catch (err) {
-          console.warn("[video/generate] Whisper failed, using fallback captions:", err)
-        }
-      }
-
-      // ── Step 3: Build captions ──────────────────────────────────────────────
-      await updateProgress({ progressStep: "Building captions…", progressPct: 35 })
-      captions = buildCaptions(transcriptWords, manifest.script)
-    } else {
-      await updateProgress({
-        progressStep: "Captions disabled — skipping transcript/caption step…",
-        progressPct: 35,
-      })
-    }
-
-    // ── Step 4: D-ID talking head video ──
-    await updateProgress({ progressStep: "Creating talking head (D-ID)…", progressPct: 45 })
-    const isMock = process.env.NEXT_PUBLIC_MOCK_MODE === "true"
     let talkingVideoUrl: string | undefined
+    const isMock = process.env.NEXT_PUBLIC_MOCK_MODE === "true"
 
-    if (!isMock) {
+    // ── Steps 2–4 (parallel): Whisper + D-ID ───────────────────────────────────
+    await updateProgress({
+      progressStep: isMock
+        ? "Preparing video…"
+        : "Transcribing + creating talking head (parallel)…",
+      progressPct: 30,
+    })
+
+    if (isMock) {
+      if (captionsEnabled) {
+        captions = buildCaptions([], manifest.script, audioDurationMs)
+      }
+    } else {
       if (!manifest.headshotImageUrl) {
         throw new Error("Missing headshotImageUrl in manifest")
       }
@@ -211,159 +193,91 @@ export async function POST(
         throw new Error("Missing/invalid talkingMode in manifest")
       }
 
-      const runDidTalkingHead = async (): Promise<string> => {
-        let didUsername = process.env.DID_API_USERNAME ?? ""
-        let didPassword = process.env.DID_API_PASSWORD ?? ""
-        didUsername = didUsername.trim()
-        didPassword = didPassword.trim()
+      console.time(`[video/generate] parallel:${id}`)
+      let transcriptWords: Awaited<ReturnType<typeof transcribeForCaptions>> = []
 
-        if (!didPassword && didUsername.includes(":")) {
-          const [u, ...rest] = didUsername.split(":")
-          didUsername = u
-          didPassword = rest.join(":")
-        }
-
-        if (!didUsername || !didPassword) {
-          throw new Error(
-            "D-ID is not configured. Provide DID_API_USERNAME + DID_API_PASSWORD from your D-ID Studio key."
-          )
-        }
-
-        const didAuthHeader = `Basic ${didUsername}:${didPassword}`
-
-        const headshotForDid = await didSourceUrlFromHeadshotBuffer(
-          manifest.headshotImageUrl!,
-          didAuthHeader
-        )
-        const audioUrlForDid = await didAudioUrlFromBlobUrl(audioUrl, didAuthHeader)
-
-        const didDriverUrl = process.env.DID_DRIVER_URL?.trim() || "bank://lively/driver-06"
-        const motionFactorRaw = process.env.DID_MOTION_FACTOR?.trim()
-        const motionFactor = motionFactorRaw ? Number(motionFactorRaw) : 0.92
-        const didMotionFactor = Number.isFinite(motionFactor)
-          ? Math.min(1, Math.max(0, motionFactor))
-          : 0.92
-
-        const createRes = await fetch("https://api.d-id.com/talks", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: didAuthHeader,
-          },
-          body: JSON.stringify({
-            source_url: headshotForDid,
-            driver_url: didDriverUrl,
-            script: {
-              type: "audio",
-              audio_url: audioUrlForDid,
-              subtitles: false,
-            },
-            name: manifest.title,
-            config: {
-              result_format: "mp4",
-              fluent: true,
-              align_driver: true,
-              auto_match: true,
-              motion_factor: didMotionFactor,
-              ...(process.env.DID_STITCH !== "false" ? { stitch: true } : {}),
-            },
-          }),
-        })
-
-        if (!createRes.ok) {
-          const text = await createRes.text().catch(() => "")
-          if (isDidCelebrityDetectedBody(text)) throw new DidCelebrityBlockedError()
-          const friendly = userMessageFromDidErrorBody(createRes.status, text)
-          if (friendly) throw new GenerationUserInputError(friendly)
-          throw new Error(
-            `D-ID create talk failed: ${createRes.status} ${createRes.statusText}${text ? ` — ${text}` : ""}`
-          )
-        }
-
-        const createJson = (await createRes.json()) as {
-          id?: string
-          status?: string
-        }
-        const didTalkId = createJson.id
-        if (!didTalkId) throw new Error("D-ID create talk failed: missing id")
-
-        let didStatus = createJson.status ?? "created"
-        let resultUrl: string | undefined
-        const startedAt = Date.now()
-
-        for (let attempt = 0; attempt < 120; attempt++) {
-          if (attempt % 2 === 0) {
-            await updateProgress({
-              progressStep: "Creating talking head (D-ID)…",
-              progressPct: 55,
-              progressDetail: `Polling D-ID… (${attempt + 1})`,
-            })
-          }
-          const statusRes = await fetch(`https://api.d-id.com/talks/${didTalkId}`, {
-            method: "GET",
-            headers: {
-              Authorization: didAuthHeader,
-            },
-          })
-
-          if (!statusRes.ok) {
-            const text = await statusRes.text().catch(() => "")
-            throw new Error(
-              `D-ID status check failed: ${statusRes.status} ${statusRes.statusText}${text ? ` — ${text}` : ""}`
-            )
-          }
-
-          const statusJson = (await statusRes.json()) as {
-            status?: string
-            result_url?: string
-            error_message?: string
-            message?: string
-          }
-
-          didStatus = statusJson.status ?? didStatus
-          if (didStatus === "done") {
-            resultUrl = statusJson.result_url
-            break
-          }
-          if (didStatus === "error" || didStatus === "rejected") {
-            const blob = JSON.stringify(statusJson)
-            if (isDidCelebrityDetectedBody(blob)) throw new DidCelebrityBlockedError()
-            const em = String(statusJson.error_message ?? statusJson.message ?? "")
-            if (isDidCelebrityDetectedBody(em)) throw new DidCelebrityBlockedError()
-            throw new Error(statusJson.error_message ?? statusJson.message ?? `D-ID failed: ${didStatus}`)
-          }
-
-          if (Date.now() - startedAt > 2 * 60 * 1000) {
-            throw new Error("D-ID talking-head generation timed out")
-          }
-
-          await sleep(2000)
-        }
-
-        if (!resultUrl) {
-          throw new Error("D-ID talking-head generation completed but no result_url returned")
-        }
-        return resultUrl
-      }
-
-      console.time(`[video/generate] d-id:${id}`)
       try {
-        talkingVideoUrl = await runDidTalkingHead()
-      } catch (didErr) {
-        if (isGenerationUserInputError(didErr)) throw didErr
+        const [words, didUrl] = await Promise.all([
+          captionsEnabled
+            ? transcribeForCaptions(audioUrl)
+            : Promise.resolve([] as Awaited<ReturnType<typeof transcribeForCaptions>>),
+          (async () => {
+            const provider = getTalkingHeadProvider()
+            console.time(`[video/generate] talking-head:${id}`)
+            try {
+              const onPoll = async ({
+                attempt,
+                status,
+                elapsedSec,
+              }: {
+                attempt: number
+                status: string
+                elapsedSec: number
+              }) => {
+                // Normalise status strings from both providers into user-facing copy.
+                // D-ID:    created | started | processing | done | error
+                // HeyGen:  pending | processing | completed | failed
+                const step =
+                  status === "created" || status === "pending"
+                    ? "Queued at provider…"
+                    : status === "started" || status === "processing"
+                      ? provider === "heygen"
+                        ? "Rendering talking head (~1–2 min)…"
+                        : "Rendering talking head…"
+                      : "Creating talking head…"
+                await updateProgress({
+                  progressStep: step,
+                  progressPct: Math.min(75, 45 + Math.round(elapsedSec / 2)),
+                  progressDetail: `${provider} · ${status} · ${elapsedSec}s · poll ${attempt}`,
+                })
+              }
 
-        const msg = didErr instanceof Error ? didErr.message : String(didErr)
-        if (msg.includes("D-ID is not configured")) throw didErr
+              const commonInput = {
+                headshotImageUrl: manifest.headshotImageUrl!,
+                audioUrl,
+                title: manifest.title,
+                logRef: id,
+                onPoll,
+              }
 
-        if (isDidCelebrityBlockedError(didErr)) {
+              return provider === "heygen"
+                ? await runHeygenTalkingHead(commonInput)
+                : await runDidTalkingHead(commonInput)
+            } finally {
+              console.timeEnd(`[video/generate] talking-head:${id}`)
+            }
+          })(),
+        ])
+        transcriptWords = words
+        talkingVideoUrl = didUrl
+      } catch (parallelErr) {
+        if (isGenerationUserInputError(parallelErr)) throw parallelErr
+        if (isDidCelebrityBlockedError(parallelErr) || isHeygenCelebrityBlockedError(parallelErr)) {
           throw new GenerationCapabilityUnavailableError()
         }
-
-        throw new GenerationUserInputError(
-          "Talking-head generation failed. Please try again in a few minutes or use a different photo."
-        )
+        const msg = parallelErr instanceof Error ? parallelErr.message : String(parallelErr)
+        // Re-throw provider misconfiguration errors as-is so ops can see the real message.
+        if (
+          msg.includes("D-ID is not configured") ||
+          msg.includes("HeyGen is not configured")
+        ) {
+          throw parallelErr
+        }
+        console.error(`[video/generate] parallel pipeline failed (${id}):`, parallelErr)
+        // Route to provider-specific user-facing message so copy never mentions the wrong provider.
+        const provider = getTalkingHeadProvider()
+        const friendly =
+          provider === "heygen"
+            ? userMessageFromHeygenFailure(parallelErr)
+            : userMessageFromDidFailure(parallelErr)
+        throw new GenerationUserInputError(friendly)
       } finally {
-        console.timeEnd(`[video/generate] d-id:${id}`)
+        console.timeEnd(`[video/generate] parallel:${id}`)
+      }
+
+      if (captionsEnabled) {
+        await updateProgress({ progressStep: "Building captions…", progressPct: 70 })
+        captions = buildCaptions(transcriptWords, manifest.script, audioDurationMs)
       }
     }
 
@@ -440,6 +354,7 @@ export async function POST(
       updatedAt: new Date().toISOString(),
     }
     await store.set(`video:${id}`, JSON.stringify(completed))
+    console.timeEnd(`[video/generate] pipeline:${id}`)
     return NextResponse.json({
       ...completed,
       bananaCreditsCharged: generationCost,

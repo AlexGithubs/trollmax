@@ -1,3 +1,4 @@
+import { prepareHeadshotForDid } from "@/lib/media/prepare-preset-headshot"
 import { DidCelebrityBlockedError } from "@/lib/d-id/did-celebrity-error"
 import { GenerationUserInputError } from "@/lib/generation/errors"
 import { downloadBlobBuffer } from "@/lib/storage/blob"
@@ -23,10 +24,12 @@ export async function didSourceUrlFromHeadshotBuffer(
   const ext = isPng ? "png" : "jpg"
   const mime = isPng ? "image/png" : "image/jpeg"
 
+  const prepared = isPng ? buffer : await prepareHeadshotForDid(buffer)
+
   const form = new FormData()
   form.append(
     "image",
-    new Blob([new Uint8Array(buffer)], { type: mime }),
+    new Blob([new Uint8Array(prepared)], { type: mime }),
     `headshot.${ext}`
   )
 
