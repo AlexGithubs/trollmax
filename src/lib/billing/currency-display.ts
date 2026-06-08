@@ -28,3 +28,9 @@ export function currencyNamePluralTitle(): string {
 export function formatCurrencyCost(amount: number): string {
   return `${amount} ${amount === 1 ? "banana credit" : "banana credits"}`
 }
+
+/** Compact number for generate-button badges (e.g. 2, 3, 1.5). */
+export function formatCreditBadgeAmount(amount: number): string {
+  if (Number.isInteger(amount)) return String(amount)
+  return amount.toFixed(1).replace(/\.0$/, "")
+}

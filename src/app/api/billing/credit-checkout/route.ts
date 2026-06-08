@@ -5,12 +5,22 @@ import Stripe from "stripe"
 import { stripe } from "@/lib/stripe"
 import { CREDIT_PACKS, validateCheckoutSelection } from "@/lib/billing/credit-packs"
 import {
+  buildCreditPurchaseSuccessUrl,
+  validateCreditCheckoutSuccessPath,
+} from "@/lib/billing/credit-checkout-url"
+import {
+  canUseDevCreditCheckout,
+  grantDevCreditPack,
+  localRequestOrigin,
+} from "@/lib/billing/dev-credit-checkout"
+import {
   getSubscriptionRecord,
   mergeSubscriptionRecord,
 } from "@/lib/billing/subscription"
 
 const BodySchema = z.object({
   packId: z.enum(["starter", "growth", "scale"]),
+  successPath: z.string().optional(),
 })
 
 function appOrigin(req: Request): string {
@@ -25,13 +35,6 @@ export async function POST(req: Request) {
   const user = await currentUser()
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-  if (!stripe) {
-    return NextResponse.json(
-      { error: "Billing is not configured (missing STRIPE_SECRET_KEY)." },
-      { status: 503 }
-    )
-  }
-
   const body = await req.json().catch(() => null)
   const parsed = BodySchema.safeParse(body)
   if (!parsed.success) {
@@ -44,6 +47,27 @@ export async function POST(req: Request) {
   }
 
   const packId = sel.packId
+  const successPath = validateCreditCheckoutSuccessPath(parsed.data.successPath)
+
+  if (canUseDevCreditCheckout(req)) {
+    try {
+      const { totalCredits } = await grantDevCreditPack(user.id, packId)
+      const origin = localRequestOrigin(req)
+      const url = buildCreditPurchaseSuccessUrl(origin, successPath, packId, totalCredits)
+      return NextResponse.json({ url, devCheckout: true })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Dev checkout failed"
+      return NextResponse.json({ error: message }, { status: 500 })
+    }
+  }
+
+  if (!stripe) {
+    return NextResponse.json(
+      { error: "Billing is not configured (missing STRIPE_SECRET_KEY)." },
+      { status: 503 }
+    )
+  }
+
   const pack = CREDIT_PACKS[packId]
   const packPriceId = process.env[pack.stripePriceEnv]?.trim() || null
   if (!packPriceId) {
@@ -56,6 +80,12 @@ export async function POST(req: Request) {
   }
 
   const origin = appOrigin(req)
+  const successUrl = buildCreditPurchaseSuccessUrl(
+    origin,
+    successPath,
+    packId,
+    sel.totalCredits
+  )
 
   let customerId = (await getSubscriptionRecord(user.id))?.stripeCustomerId
   if (!customerId) {
@@ -76,7 +106,7 @@ export async function POST(req: Request) {
       line_items: [{ price: packPriceId, quantity: 1 }],
       /** Required when Dashboard has no compatible methods enabled for dynamic PMs. */
       payment_method_types: ["card"],
-      success_url: `${origin}/app?credit_purchase=success`,
+      success_url: successUrl,
       cancel_url: `${origin}/pricing/checkout?pack=${packId}&credit_purchase=canceled`,
       metadata: {
         clerkUserId: user.id,

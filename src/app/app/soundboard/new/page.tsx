@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useEffect, useMemo, type MouseEvent } from "react"
+import { useState, useRef, useEffect, useMemo, useCallback, type MouseEvent } from "react"
 import { useRouter } from "next/navigation"
 import { useUser, useClerk } from "@clerk/nextjs"
 import { Button } from "@/components/ui/button"
@@ -24,8 +24,28 @@ import type {
   VoicePresetPublic,
   VoicePresetCategory,
 } from "@/lib/voice-presets/catalog"
-import { currencyIconAlt, currencyIconSrc } from "@/lib/billing/currency-display"
+import {
+  currencyIconAlt,
+  currencyIconSrc,
+  formatCreditBadgeAmount,
+  formatCurrencyCost,
+} from "@/lib/billing/currency-display"
+import { soundboardGenerationCostBananaCredits } from "@/lib/billing/soundboard-generation-cost"
+import { CreditGateScreen } from "@/components/billing/CreditGateScreen"
+import { clearPendingGeneration } from "@/lib/client/pending-generation"
+import {
+  PENDING_GENERATION_RESUME_EVENT,
+  type PendingGenerationResumeDetail,
+} from "@/lib/client/resume-generation"
 import { cn } from "@/lib/utils"
+
+const SOUNDBOARD_RETURN_PATH = "/app/soundboard/new"
+
+type CreditGateState = {
+  manifestId: string
+  balance: number
+  required: number
+}
 
 const DEFAULT_PHRASES = [
   "Hello there",
@@ -36,7 +56,14 @@ const DEFAULT_PHRASES = [
   "Main character energy",
 ]
 
-type Stage = "idle" | "processing" | "uploading" | "uploaded" | "generating" | "done"
+type Stage =
+  | "idle"
+  | "processing"
+  | "uploading"
+  | "uploaded"
+  | "credit_gate"
+  | "generating"
+  | "done"
 
 type VoiceMode = "upload" | "preset"
 
@@ -118,6 +145,7 @@ export default function NewSoundboardPage() {
   const [ttsAvail, setTtsAvail] = useState<TtsAvailability | null>(null)
 
   const [genId, setGenId] = useState<string | null>(null)
+  const [creditGate, setCreditGate] = useState<CreditGateState | null>(null)
   const [progressStep, setProgressStep] = useState<string | null>(null)
   const [progressPct, setProgressPct] = useState<number | null>(null)
   const [progressDetail, setProgressDetail] = useState<string | null>(null)
@@ -308,8 +336,136 @@ export default function NewSoundboardPage() {
     setPhrases((p) => p.filter((_, j) => j !== i))
   }
 
+  const baseMaxPhrases = ent?.baseMaxPhrases ?? 6
+  const baseMaxPhraseChars = ent?.baseMaxPhraseChars ?? 70
+  const validPhrasesForCost = useMemo(
+    () => phrases.map((p) => p.trim()).filter((p) => p.length > 0),
+    [phrases]
+  )
+  const generationCost = useMemo(
+    () =>
+      soundboardGenerationCostBananaCredits(
+        validPhrasesForCost,
+        baseMaxPhrases,
+        baseMaxPhraseChars
+      ),
+    [validPhrasesForCost, baseMaxPhrases, baseMaxPhraseChars]
+  )
+  const requiresExpansion = generationCost > 1
+
+  const openCreditGate = useCallback((manifestId: string, balance: number, required: number) => {
+    setCreditGate({ manifestId, balance, required })
+    setStage("credit_gate")
+  }, [])
+
+  const runGenerationPipeline = useCallback(
+    async (createdId: string, cost: number) => {
+      setCreditGate(null)
+      setError("")
+      setGenId(createdId)
+
+      let genHttpError: Error | null = null
+      let postGenBananaBalance: number | undefined
+      const genPromise = fetch(`/api/soundboard/${createdId}/generate`, { method: "POST" })
+        .then(async (r) => {
+          const j = await r.json().catch(() => ({}))
+          if (r.status === 402) {
+            const o = j as {
+              code?: string
+              balance?: number
+              required?: number
+            }
+            if (o.code === "INSUFFICIENT_BANANA_CREDITS") {
+              openCreditGate(
+                createdId,
+                typeof o.balance === "number" ? o.balance : 0,
+                typeof o.required === "number" ? o.required : cost
+              )
+              return null
+            }
+          }
+          if (!r.ok) {
+            const o = j as { error?: string; detail?: string }
+            const msg = [o.error, o.detail].filter(Boolean).join(" — ")
+            throw new Error(msg || "Generation failed")
+          }
+          const o = j as { id?: string; bananaCreditsBalance?: number }
+          if (typeof o.bananaCreditsBalance === "number") postGenBananaBalance = o.bananaCreditsBalance
+          return o
+        })
+        .catch((e) => {
+          genHttpError = e instanceof Error ? e : new Error(String(e))
+        })
+
+      const genResult = await genPromise
+      if (genResult === null) return
+
+      setStage("generating")
+
+      let completed = false
+      for (let attempt = 0; attempt < 900; attempt++) {
+        if (genHttpError) throw genHttpError
+        const statusRes = await fetch(`/api/soundboard/${createdId}/status`, { method: "GET" })
+        const statusJson = (await statusRes.json().catch(() => null)) as
+          | {
+              status?: string
+              progressStep?: string | null
+              progressPct?: number | null
+              progressDetail?: string | null
+              lastError?: string | null
+            }
+          | null
+
+        if (statusJson) {
+          setProgressStep(statusJson.progressStep ?? null)
+          setProgressPct(typeof statusJson.progressPct === "number" ? statusJson.progressPct : null)
+          setProgressDetail(statusJson.progressDetail ?? null)
+          if (statusJson.lastError) throw new Error(statusJson.lastError)
+          if (statusJson.status === "complete") {
+            completed = true
+            break
+          }
+          if (statusJson.status === "failed") throw new Error(statusJson.lastError ?? "Generation failed")
+        }
+
+        await new Promise((r) => setTimeout(r, 1000))
+      }
+
+      if (!completed) {
+        void genPromise.catch(() => {})
+        throw new Error(
+          "Generation is taking longer than expected. Check your soundboards list for this board, or try again in a few minutes."
+        )
+      }
+
+      await genPromise
+      if (typeof postGenBananaBalance === "number") {
+        emitBananaCreditsUpdated(postGenBananaBalance)
+      }
+      clearPendingGeneration()
+      router.refresh()
+      setStage("done")
+      router.push(`/app/soundboard/${createdId}`)
+    },
+    [router, openCreditGate]
+  )
+
+  const runGenerationPipelineRef = useRef(runGenerationPipeline)
+  runGenerationPipelineRef.current = runGenerationPipeline
+
+  useEffect(() => {
+    const onResume = (e: Event) => {
+      const d = (e as CustomEvent<PendingGenerationResumeDetail>).detail
+      if (d.product !== "soundboard") return
+      void runGenerationPipelineRef.current(d.manifestId, generationCost)
+    }
+    window.addEventListener(PENDING_GENERATION_RESUME_EVENT, onResume)
+    return () => window.removeEventListener(PENDING_GENERATION_RESUME_EVENT, onResume)
+  }, [generationCost])
+
   async function handleGenerate() {
     setError("")
+    setCreditGate(null)
     if (!isSignedIn) {
       openSignIn()
       return
@@ -351,8 +507,6 @@ export default function NewSoundboardPage() {
       }
     }
 
-    setStage("generating")
-
     try {
       const body =
         voiceMode === "preset"
@@ -383,71 +537,17 @@ export default function NewSoundboardPage() {
       if (!createRes.ok) throw new Error(created.error ?? "Failed to create soundboard")
 
       const createdId = String(created.id)
-      setGenId(createdId)
-
-      // Fire generation request but drive UI by polling status.
-      let genHttpError: Error | null = null
-      let postGenBananaBalance: number | undefined
-      const genPromise = fetch(`/api/soundboard/${createdId}/generate`, { method: "POST" })
-        .then(async (r) => {
-          const j = await r.json().catch(() => ({}))
-          if (!r.ok) {
-            const o = j as { error?: string; detail?: string }
-            const msg = [o.error, o.detail].filter(Boolean).join(" — ")
-            throw new Error(msg || "Generation failed")
-          }
-          const o = j as { id?: string; bananaCreditsBalance?: number }
-          if (typeof o.bananaCreditsBalance === "number") postGenBananaBalance = o.bananaCreditsBalance
-          return o
-        })
-        .catch((e) => {
-          genHttpError = e instanceof Error ? e : new Error(String(e))
-        })
-
-      let completed = false
-      for (let attempt = 0; attempt < 900; attempt++) {
-        if (genHttpError) throw genHttpError
-        // 15 minutes max, but usually far less.
-        const statusRes = await fetch(`/api/soundboard/${createdId}/status`, { method: "GET" })
-        const statusJson = (await statusRes.json().catch(() => null)) as
-          | {
-              status?: string
-              progressStep?: string | null
-              progressPct?: number | null
-              progressDetail?: string | null
-              lastError?: string | null
-            }
-          | null
-
-        if (statusJson) {
-          setProgressStep(statusJson.progressStep ?? null)
-          setProgressPct(typeof statusJson.progressPct === "number" ? statusJson.progressPct : null)
-          setProgressDetail(statusJson.progressDetail ?? null)
-          if (statusJson.lastError) throw new Error(statusJson.lastError)
-          if (statusJson.status === "complete") {
-            completed = true
-            break
-          }
-          if (statusJson.status === "failed") throw new Error(statusJson.lastError ?? "Generation failed")
+      const entRes = await fetch("/api/billing/entitlement")
+      if (entRes.ok) {
+        const entData = (await entRes.json()) as { bananaCreditsBalance?: number }
+        const balance =
+          typeof entData.bananaCreditsBalance === "number" ? entData.bananaCreditsBalance : 0
+        if (balance < generationCost) {
+          openCreditGate(createdId, balance, generationCost)
+          return
         }
-
-        await new Promise((r) => setTimeout(r, 1000))
       }
-
-      if (!completed) {
-        void genPromise.catch(() => {})
-        throw new Error(
-          "Generation is taking longer than expected. Check your soundboards list for this board, or try again in a few minutes."
-        )
-      }
-
-      await genPromise
-      if (typeof postGenBananaBalance === "number") {
-        emitBananaCreditsUpdated(postGenBananaBalance)
-      }
-      router.refresh()
-      setStage("done")
-      router.push(`/app/soundboard/${createdId}`)
+      await runGenerationPipeline(createdId, generationCost)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong")
       setStage(voiceMode === "preset" ? "idle" : "uploaded")
@@ -455,22 +555,40 @@ export default function NewSoundboardPage() {
   }
 
   const busy =
-    stage === "processing" || stage === "uploading" || stage === "generating" || removingSample
+    stage === "processing" ||
+    stage === "uploading" ||
+    stage === "generating" ||
+    stage === "credit_gate" ||
+    removingSample
   const validPhraseCount = phrases.filter((p) => p.trim().length > 0).length
 
   const maxPhrases = ent?.maxPhrases ?? 6
   const maxPhraseChars = ent?.maxPhraseChars ?? 70
-  const baseMaxPhrases = ent?.baseMaxPhrases ?? 6
-  const baseMaxPhraseChars = ent?.baseMaxPhraseChars ?? 70
   const atSoundboardLimit = ent?.atSoundboardLimit ?? false
-  const requiresExpansion =
-    phrases.length > baseMaxPhrases || phrases.some((phrase) => phrase.length > baseMaxPhraseChars)
-  const generationCost = requiresExpansion ? 1.5 : 1
 
   const voiceReady =
     voiceMode === "upload"
       ? Boolean(sampleUrl)
       : Boolean(selectedPresetId && selectedPreset?.status === "active")
+
+  if (stage === "credit_gate" && creditGate) {
+    return (
+      <CreditGateScreen
+        product="soundboard"
+        balance={creditGate.balance}
+        required={creditGate.required}
+        manifestId={creditGate.manifestId}
+        returnPath={SOUNDBOARD_RETURN_PATH}
+        alternateHref="/app/video/new"
+        alternateLabel="Try video (2 credits)"
+        onBack={() => {
+          clearPendingGeneration()
+          setCreditGate(null)
+          setStage(voiceMode === "preset" ? "idle" : "uploaded")
+        }}
+      />
+    )
+  }
 
   if (stage === "generating") {
     return (
@@ -880,17 +998,21 @@ export default function NewSoundboardPage() {
                     Add phrase
                   </Button>
                 )}
-                {requiresExpansion && (
-                  <p className="text-[11px] leading-snug text-muted-foreground/75">
-                    This board uses expanded phrases (+0.5{" "}
+                <p className="text-[11px] text-muted-foreground flex flex-wrap items-center gap-1.5">
+                  <span>
+                    {requiresExpansion
+                      ? "Base 1 credit + 0.5 expansion for extra phrases or length."
+                      : "Base rate is 1 credit per soundboard."}
+                  </span>
+                  <span className="inline-flex items-center gap-1 text-foreground/90">
+                    {formatCurrencyCost(generationCost)}
                     <img
                       src={currencyIconSrc()}
                       alt={currencyIconAlt()}
-                      className="inline h-3.5 w-3.5 object-contain align-[-1px] opacity-90"
-                    />{" "}
-                    on top of the base generate).
-                  </p>
-                )}
+                      className="inline h-3 w-3 object-contain"
+                    />
+                  </span>
+                </p>
                 <details data-tour="sb-expansion" className="group rounded-md border border-border/30 bg-secondary/5 px-2.5 py-1.5 text-[11px] text-muted-foreground/65 open:border-border/50 open:bg-secondary/10">
                   <summary className="cursor-pointer list-none select-none marker:content-none [&::-webkit-details-marker]:hidden">
                     <span className="underline decoration-border/50 underline-offset-2 group-open:no-underline">
@@ -1034,7 +1156,7 @@ export default function NewSoundboardPage() {
             </span>
             <span className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-black/15 px-3 py-1.5 text-sm font-bold backdrop-blur-sm">
               <img src={currencyIconSrc()} alt={currencyIconAlt()} className="h-7 w-7 object-contain" />
-              {generationCost}
+              {formatCreditBadgeAmount(generationCost)}
             </span>
           </Button>
     </div>

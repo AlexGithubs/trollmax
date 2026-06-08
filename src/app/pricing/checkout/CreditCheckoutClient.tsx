@@ -14,6 +14,9 @@ import {
   type CreditPackId,
   type CreditPackPublic,
 } from "@/lib/billing/credit-packs"
+import { formatPackOutputLine } from "@/lib/billing/pack-output-estimates"
+import { isLocalhostClient } from "@/lib/client/is-localhost"
+import { useCreditCheckout } from "@/components/billing/useCreditCheckout"
 import { cn } from "@/lib/utils"
 import { Loader2 } from "lucide-react"
 
@@ -24,51 +27,27 @@ export function CreditCheckoutClient({
   packs,
   initialPackId,
   canceled,
+  successPath = "/app",
 }: {
   packs: CreditPackPublic[]
   initialPackId: CreditPackId
   canceled: boolean
+  successPath?: string
 }) {
   const { isSignedIn } = useAuth()
   const [packId, setPackId] = useState<CreditPackId>(initialPackId)
-  const [loading, setLoading] = useState(false)
+  const { startCheckout, loading, error: checkoutError } = useCreditCheckout()
+  const devCheckout = isLocalhostClient()
 
   const selected = useMemo(
     () => packs.find((p) => p.id === packId) ?? packs[0],
     [packs, packId]
   )
 
-  const startCheckout = useCallback(async () => {
+  const onPay = useCallback(() => {
     if (!isSignedIn) return
-    setLoading(true)
-    try {
-      const res = await fetch("/api/billing/credit-checkout", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ packId }),
-      })
-      const text = await res.text()
-      let data: { url?: string; error?: string } = {}
-      if (text.trim()) {
-        try {
-          data = JSON.parse(text) as { url?: string; error?: string }
-        } catch {
-          throw new Error(text.slice(0, 200) || `Server error (${res.status})`)
-        }
-      }
-      if (!res.ok) {
-        throw new Error(data.error ?? `Checkout failed (${res.status})`)
-      }
-      if (data.url) {
-        window.location.href = data.url
-        return
-      }
-      throw new Error("No checkout URL returned")
-    } catch (e) {
-      alert(e instanceof Error ? e.message : "Checkout failed")
-      setLoading(false)
-    }
-  }, [isSignedIn, packId])
+    void startCheckout({ packId, successPath })
+  }, [isSignedIn, packId, startCheckout, successPath])
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -98,6 +77,18 @@ export function CreditCheckoutClient({
             <p className="mt-3 text-sm text-muted-foreground">
               {selected.credits} {currencyNamePluralLower()} · {money(selected.usdPerCredit)} each
             </p>
+
+            {successPath !== "/app" ? (
+              <p className="mt-8 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3 text-sm text-muted-foreground">
+                After checkout you&apos;ll return to finish what you started.
+              </p>
+            ) : null}
+
+            {devCheckout ? (
+              <p className="mt-4 rounded-xl border border-amber-500/35 bg-amber-500/10 px-4 py-3 text-sm text-amber-950 dark:text-amber-100">
+                Local dev mode — purchase adds credits instantly. No Stripe, no card.
+              </p>
+            ) : null}
 
             {canceled ? (
               <p className="mt-8 rounded-xl border border-border/50 bg-muted/15 px-4 py-3 text-sm text-muted-foreground">
@@ -131,20 +122,27 @@ export function CreditCheckoutClient({
                 size="lg"
                 className="h-12 w-full rounded-xl text-sm font-medium"
                 disabled={loading}
-                onClick={() => void startCheckout()}
+                onClick={onPay}
               >
                 {loading ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    Opening Stripe…
+                    {devCheckout ? "Adding credits…" : "Opening Stripe…"}
                   </>
+                ) : devCheckout ? (
+                  "Complete purchase (dev)"
                 ) : (
                   "Pay with Stripe"
                 )}
               </Button>
             )}
+            {checkoutError ? (
+              <p className="mt-2 text-center text-xs text-destructive">{checkoutError}</p>
+            ) : null}
             <p className="mt-4 text-center text-[10px] leading-relaxed text-muted-foreground/75">
-              Secure payment · You’ll finish on Stripe’s page
+              {devCheckout
+                ? "Dev only · credits granted on this machine"
+                : "Secure payment · You'll finish on Stripe's page"}
             </p>
           </div>
         </aside>
@@ -185,7 +183,7 @@ export function CreditCheckoutClient({
                         ) : null}
                       </div>
                       <p className="mt-1 text-sm text-muted-foreground">
-                        {p.credits} credits · save {p.savingsVsRackPercent}%
+                        {p.credits} credits · {formatPackOutputLine(p.credits)}
                       </p>
                     </div>
                     <span className="shrink-0 text-lg font-semibold tabular-nums">

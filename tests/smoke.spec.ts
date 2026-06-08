@@ -18,12 +18,13 @@ test("landing page — renders hero + two product sections", async ({ page }) =>
 })
 
 // ── Pricing page ────────────────────────────────────────────────────────────
-test("pricing page — Free + Pro tiers visible", async ({ page }) => {
+test("pricing page — credit packs visible", async ({ page }) => {
   await page.goto(`${BASE}/pricing`)
   await expect(page).toHaveTitle(/Pricing/)
-  await expect(page.getByText("Simple pricing")).toBeVisible()
-  await expect(page.getByText("$0")).toBeVisible()
-  await expect(page.getByText("$12")).toBeVisible()
+  await expect(page.getByText(/Buy banana credits — pay once, create forever/i)).toBeVisible()
+  await expect(page.getByText("$9.99")).toBeVisible()
+  await expect(page.getByText("$24.99")).toBeVisible()
+  await expect(page.getByText("~16 videos or ~32 soundboards")).toBeVisible()
   await expect(page.getByText(/soundboard/i).first()).toBeVisible()
   await page.screenshot({ path: "tests/screenshots/pricing.png", fullPage: true })
 })

@@ -40,10 +40,10 @@ export default function PricingPage() {
         <section className="mx-auto max-w-[1400px] px-4 py-16 sm:px-6 md:py-24 lg:px-10 lg:py-28">
           <header className="mx-auto mb-14 max-w-2xl text-center md:mb-20">
             <h1 className="text-[2.5rem] font-semibold leading-[1.1] tracking-tight text-foreground sm:text-5xl md:text-[3.25rem]">
-              Choose your plan
+              Buy banana credits — pay once, create forever.
             </h1>
             <p className="mx-auto mt-5 max-w-lg text-base leading-relaxed text-muted-foreground md:text-lg">
-              One-time credit packs. Everyone starts with 5 free{" "}
+              One-time credit packs — credits never expire. Everyone starts with 5 free{" "}
               <Image
                 src={currencyIconSrc()}
                 alt=""

@@ -1,11 +1,14 @@
+import { formatPackOutputLine } from "./pack-output-estimates"
+
 /**
  * Banana credit one-time packs — Stripe Checkout `payment` mode (one line item per purchase).
  *
  * Create matching one-time Prices in Stripe; set env vars below. Amounts must match `priceUsd`.
  *
  * Margin guardrails (indicative — tune from provider bills):
- * - Lowest effective $/credit ≈ Scale pack (~$0.625 at 120 / $74.99).
+ * - Lowest effective $/credit ≈ Scale pack (~$0.714 at 70 / $49.99).
  * - Minimum video debit: 2 credits → compare to your D-ID + TTS + compose average.
+ * - Stripe Price amounts must match `priceUsd`; credit grants come from this file via price ID.
  */
 
 export const RACK_USD_PER_CREDIT = 0.99
@@ -27,22 +30,22 @@ export const CREDIT_PACKS: Record<CreditPackId, PackDef> = {
   starter: {
     id: "starter",
     label: "Starter",
-    credits: 25,
-    priceUsd: 17.99,
+    credits: 12,
+    priceUsd: 9.99,
     stripePriceEnv: "STRIPE_CREDIT_PACK_STARTER_PRICE_ID",
   },
   growth: {
     id: "growth",
     label: "Growth",
-    credits: 60,
-    priceUsd: 39.99,
+    credits: 32,
+    priceUsd: 24.99,
     stripePriceEnv: "STRIPE_CREDIT_PACK_GROWTH_PRICE_ID",
   },
   scale: {
     id: "scale",
     label: "Scale",
-    credits: 120,
-    priceUsd: 74.99,
+    credits: 70,
+    priceUsd: 49.99,
     stripePriceEnv: "STRIPE_CREDIT_PACK_SCALE_PRICE_ID",
   },
 }
@@ -61,6 +64,9 @@ export type CreditPackPublic = {
   features: string[]
 }
 
+const money = (n: number) =>
+  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n)
+
 export function getCreditPacksForPublic(): CreditPackPublic[] {
   return CREDIT_PACK_IDS.map((id) => {
     const p = CREDIT_PACKS[id]
@@ -72,27 +78,32 @@ export function getCreditPacksForPublic(): CreditPackPublic[] {
       maximumFractionDigits: 3,
     }).format(usdPerCredit)
 
+    const outputLine = formatPackOutputLine(p.credits)
+
     let features: string[]
     if (id === "starter") {
       features = [
-        `${p.credits} banana credits`,
-        "Soundboards + brainrot video generator",
-        `${perCredit} effective per credit`,
-        `${Math.round((1 - usdPerCredit / RACK_USD_PER_CREDIT) * 100)}% below ${RACK_USD_PER_CREDIT.toFixed(2)} rack`,
+        outputLine,
+        `${p.credits} banana credits · ${money(p.priceUsd)} one-time`,
+        "Videos + voice-clone soundboards",
+        `${perCredit} per credit`,
+        "Perfect for trying a few projects",
       ]
     } else if (id === "growth") {
       features = [
-        "Everything in Starter",
-        `${p.credits} banana credits`,
-        `${perCredit} per credit — better value`,
-        "Best for weekly creators",
+        outputLine,
+        `${p.credits} banana credits · ${money(p.priceUsd)} one-time`,
+        `${perCredit} per credit — save vs Starter`,
+        "Best for posting every week",
+        "Most popular",
       ]
     } else {
       features = [
-        "Everything in Growth",
-        `${p.credits} banana credits`,
-        `${perCredit} per credit — best rate`,
-        "Built for volume and teams",
+        outputLine,
+        `${p.credits} banana credits · ${money(p.priceUsd)} one-time`,
+        `${perCredit} per credit — lowest rate`,
+        "For daily creators and meme pages",
+        "Credits never expire",
       ]
     }
 

@@ -1,16 +1,10 @@
 import { getManifestStore } from "@/lib/storage"
 import type { ManifestStore } from "@/lib/storage/types"
 import { isBillingAdmin } from "./admin"
-import { VIDEO_GENERATE_BASE_BANANA_CREDITS } from "./video-generation-cost"
+export { BANANA_CREDIT_COSTS } from "./credit-costs"
 
 export const STARTING_BANANA_CREDITS = 5
 export const BILLING_ADMIN_TEST_BANANA_CREDITS = 100
-
-export const BANANA_CREDIT_COSTS = {
-  soundboardGenerate: 1,
-  videoGenerate: VIDEO_GENERATE_BASE_BANANA_CREDITS,
-  soundboardExpansion: 0.5,
-} as const
 
 /** Legacy KV key; keep for existing user balances. */
 const BALANCE_STORAGE_KEY = (userId: string) => `user:${userId}:doinks`

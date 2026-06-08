@@ -4,6 +4,7 @@ import {
   type CreditPackId,
   getCreditPacksForPublic,
 } from "@/lib/billing/credit-packs"
+import { validateCreditCheckoutSuccessPath } from "@/lib/billing/credit-checkout-url"
 import { CreditCheckoutClient } from "./CreditCheckoutClient"
 
 export const metadata = {
@@ -22,13 +23,21 @@ function parsePackId(raw: string | string[] | undefined): CreditPackId {
 export default async function CreditCheckoutPage({
   searchParams,
 }: {
-  searchParams: Promise<{ pack?: string | string[]; credit_purchase?: string | string[] }>
+  searchParams: Promise<{
+    pack?: string | string[]
+    credit_purchase?: string | string[]
+    return?: string | string[]
+  }>
 }) {
   const sp = await searchParams
   const initialPackId = parsePackId(sp.pack)
   const canceledRaw = sp.credit_purchase
   const canceled =
     (Array.isArray(canceledRaw) ? canceledRaw[0] : canceledRaw) === "canceled"
+  const returnRaw = sp.return
+  const returnPath = validateCreditCheckoutSuccessPath(
+    Array.isArray(returnRaw) ? returnRaw[0] : returnRaw
+  )
   const packs = getCreditPacksForPublic()
 
   return (
@@ -36,6 +45,7 @@ export default async function CreditCheckoutPage({
       packs={packs}
       initialPackId={initialPackId}
       canceled={canceled}
+      successPath={returnPath}
     />
   )
 }
