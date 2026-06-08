@@ -17,7 +17,6 @@ import {
   Upload,
   Image as ImageIcon,
   Trash2,
-  Info,
   Loader2,
   CheckCircle2,
   Clock,
@@ -33,7 +32,6 @@ import { validateHeadshotFace } from "@/lib/headshot/validate-headshot-face"
 import {
   currencyIconAlt,
   currencyIconSrc,
-  formatCreditBadgeAmount,
   formatCurrencyCost,
 } from "@/lib/billing/currency-display"
 import { videoGenerationCostBananaCredits } from "@/lib/billing/video-generation-cost"
@@ -49,6 +47,24 @@ import {
   type HeadshotPreset,
 } from "@/lib/headshot-presets/catalog"
 import { cn } from "@/lib/utils"
+import { MoreOptions } from "@/components/video/MoreOptions"
+import { SCRIPT_TEMPLATES } from "@/lib/video/script-templates"
+import { VideoWizardStepper, type WizardStep } from "./VideoWizardStepper"
+import { VideoWizardFooter } from "./VideoWizardFooter"
+import { LayoutOptionPicker } from "./LayoutOptionPicker"
+import {
+  TOUR_STEP_CHANGED_EVENT,
+  TOUR_VIDEO_WIZARD_STEP,
+  WIZARD_STEP_READY_EVENT,
+  type TourStepChangedDetail,
+} from "@/lib/client/video-form-draft"
+import {
+  loadVideoDraftManifest,
+  upsertVideoDraft,
+  videoEditHref,
+} from "@/lib/client/video-draft"
+import { hasVideoDraftContent, type VideoDraftUpsertBody } from "@/lib/video/video-draft"
+import type { VideoManifest } from "@/lib/manifests/types"
 
 // D-ID is strict about image size; we target a safer ceiling before upload.
 const DID_HEADSHOT_TARGET_BYTES = 9_000_000
@@ -59,6 +75,77 @@ function isPrivateVercelBlobUrlClient(url: string): boolean {
     url.includes("blob.vercel-storage.com") &&
     !url.includes(".public.blob.vercel-storage.com")
   )
+}
+
+/** Resolve a URL safe for `<img src>` from stored headshot state. */
+function resolveHeadshotDisplayUrl(
+  previewUrl: string,
+  imageUrl: string,
+  presetId: string | null
+): string {
+  if (presetId && imageUrl) {
+    const preset = HEADSHOT_PRESETS.find((p) => p.id === presetId)
+    if (preset) return headshotPresetImageSrc(preset)
+  }
+  if (previewUrl.startsWith("blob:")) return previewUrl
+  if (previewUrl && !isPrivateVercelBlobUrlClient(previewUrl)) return previewUrl
+  if (imageUrl && !isPrivateVercelBlobUrlClient(imageUrl)) return imageUrl
+  return ""
+}
+
+type VoiceKind = "preset" | "board" | "upload"
+
+type FormDraftSnapshot = {
+  wizardStep: WizardStep
+  videoTitle: string
+  script: string
+  voiceKind: VoiceKind
+  selectedPresetId: string | null
+  selectedBoardId: string
+  voiceSampleUrl: string
+  voiceUploadRefText: string
+  talkingMode: "full" | "half"
+  headshotImageUrl: string
+  headshotName: string
+  selectedHeadshotPresetId: string | null
+  backgroundVideoId: string
+  captionsEnabled: boolean
+  consent: boolean
+}
+
+function buildServerDraftPayload(
+  snapshot: FormDraftSnapshot,
+  draftManifestId: string | null
+): VideoDraftUpsertBody {
+  return {
+    ...(draftManifestId ? { id: draftManifestId } : {}),
+    wizardStep: snapshot.wizardStep,
+    title: snapshot.videoTitle,
+    script: snapshot.script,
+    voiceKind: snapshot.voiceKind,
+    selectedPresetId: snapshot.selectedPresetId,
+    selectedBoardId: snapshot.selectedBoardId,
+    voiceSampleUrl: snapshot.voiceSampleUrl,
+    voiceUploadRefText: snapshot.voiceUploadRefText,
+    talkingMode: snapshot.talkingMode,
+    headshotImageUrl: snapshot.headshotImageUrl,
+    headshotName: snapshot.headshotName,
+    headshotPresetId: snapshot.selectedHeadshotPresetId,
+    backgroundVideoId: snapshot.backgroundVideoId,
+    captionsEnabled: snapshot.captionsEnabled,
+    consentAcknowledged: snapshot.consent,
+  }
+}
+
+function formBackgroundFromManifest(manifest: VideoManifest): string {
+  if (
+    manifest.talkingMode === "half" &&
+    manifest.backgroundVideoId &&
+    manifest.backgroundVideoId !== "none"
+  ) {
+    return manifest.backgroundVideoId
+  }
+  return "minecraft"
 }
 
 /**
@@ -150,8 +237,6 @@ type CreditGateState = {
   required: number
 }
 
-const VIDEO_RETURN_PATH = "/app/video/new"
-
 function generationErrorKindFromCode(code?: string | null): VideoGenerationErrorKind {
   return code === "GENERATION_CAPABILITY_UNAVAILABLE" ? "capability_unavailable" : "error"
 }
@@ -159,8 +244,6 @@ function generationErrorKindFromCode(code?: string | null): VideoGenerationError
 function throwGenerationFailure(message: string, code?: string | null): never {
   throw { message, kind: generationErrorKindFromCode(code) } satisfies GenerationFailure
 }
-
-type VoiceKind = "preset" | "board" | "upload"
 
 type VoiceUploadStage = "idle" | "processing" | "uploading" | "uploaded"
 
@@ -275,10 +358,266 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
   const [headshotBusyLabel, setHeadshotBusyLabel] = useState<string | null>(null)
   const [captionsEnabled, setCaptionsEnabled] = useState(true)
   const [consent, setConsent] = useState(false)
+  const [wizardStep, setWizardStep] = useState<WizardStep>(1)
   const [selectedHeadshotPresetId, setSelectedHeadshotPresetId] = useState<string | null>(null)
   const [headshotDragActive, setHeadshotDragActive] = useState(false)
   const [voiceDragActive, setVoiceDragActive] = useState(false)
   const headshotInputRef = useRef<HTMLInputElement>(null)
+  /** Tracks the active blob preview so we only revoke on replace/unmount. */
+  const headshotBlobRef = useRef<string | null>(null)
+  const [draftReady, setDraftReady] = useState(false)
+  const [draftManifestId, setDraftManifestId] = useState<string | null>(null)
+  const draftManifestIdRef = useRef<string | null>(null)
+  const draftSaveInFlightRef = useRef(false)
+
+  const headshotDisplayUrl = useMemo(
+    () => resolveHeadshotDisplayUrl(headshotPreviewUrl, headshotImageUrl, selectedHeadshotPresetId),
+    [headshotPreviewUrl, headshotImageUrl, selectedHeadshotPresetId]
+  )
+
+  const draftPayloadRef = useRef<FormDraftSnapshot>({
+    wizardStep: 1,
+    videoTitle: "",
+    script: "",
+    voiceKind: presets.length > 0 ? "preset" : "board",
+    selectedPresetId: presets[0]?.id ?? null,
+    selectedBoardId: boards[0]?.id ?? "",
+    voiceSampleUrl: "",
+    voiceUploadRefText: "",
+    talkingMode: "full",
+    headshotImageUrl: "",
+    headshotName: "",
+    selectedHeadshotPresetId: null,
+    backgroundVideoId: "minecraft",
+    captionsEnabled: true,
+    consent: false,
+  })
+
+  useEffect(() => {
+    draftManifestIdRef.current = draftManifestId
+  }, [draftManifestId])
+
+  useEffect(() => {
+    draftPayloadRef.current = {
+      wizardStep,
+      videoTitle,
+      script,
+      voiceKind,
+      selectedPresetId,
+      selectedBoardId,
+      voiceSampleUrl,
+      voiceUploadRefText,
+      talkingMode,
+      headshotImageUrl,
+      headshotName,
+      selectedHeadshotPresetId,
+      backgroundVideoId,
+      captionsEnabled,
+      consent,
+    }
+  }, [
+    wizardStep,
+    videoTitle,
+    script,
+    voiceKind,
+    selectedPresetId,
+    selectedBoardId,
+    voiceSampleUrl,
+    voiceUploadRefText,
+    talkingMode,
+    headshotImageUrl,
+    headshotName,
+    selectedHeadshotPresetId,
+    backgroundVideoId,
+    captionsEnabled,
+    consent,
+  ])
+
+  const persistServerDraft = useCallback(
+    async (manifestId: string | null): Promise<string | null> => {
+      if (!isSignedIn || draftSaveInFlightRef.current) return manifestId
+      const body = buildServerDraftPayload(draftPayloadRef.current, manifestId)
+      if (!hasVideoDraftContent(body)) return manifestId
+
+      draftSaveInFlightRef.current = true
+      try {
+        const result = await upsertVideoDraft(body)
+        if (!result?.id) return manifestId
+        if (result.id !== manifestId) {
+          setDraftManifestId(result.id)
+          draftManifestIdRef.current = result.id
+          router.replace(videoEditHref(result.id), { scroll: false })
+        }
+        return result.id
+      } finally {
+        draftSaveInFlightRef.current = false
+      }
+    },
+    [isSignedIn, router]
+  )
+
+  const flushServerDraft = useCallback(() => {
+    if (!isSignedIn) return
+    const body = buildServerDraftPayload(
+      draftPayloadRef.current,
+      draftManifestIdRef.current
+    )
+    if (!hasVideoDraftContent(body)) return
+    void fetch("/api/video/draft", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      keepalive: true,
+    })
+  }, [isSignedIn])
+
+  useEffect(() => {
+    const startFresh = searchParams.get("new") === "1"
+    const soundboardId = searchParams.get("soundboardId")?.trim()
+    const draftId = searchParams.get("id")?.trim()
+
+    if (startFresh) {
+      setDraftManifestId(null)
+      draftManifestIdRef.current = null
+      router.replace("/app/video/new", { scroll: false })
+      setDraftReady(true)
+      return
+    }
+
+    if (soundboardId) {
+      setDraftManifestId(null)
+      draftManifestIdRef.current = null
+      setDraftReady(true)
+      return
+    }
+
+    if (!draftId || !isSignedIn) {
+      setDraftReady(true)
+      return
+    }
+
+    let cancelled = false
+    void loadVideoDraftManifest(draftId).then((manifest) => {
+      if (cancelled) return
+      if (!manifest || manifest.status !== "draft") {
+        setDraftReady(true)
+        return
+      }
+
+      setDraftManifestId(manifest.id)
+      draftManifestIdRef.current = manifest.id
+      setWizardStep(manifest.wizardStep ?? 1)
+      setVideoTitle(manifest.title)
+      setScript(manifest.script)
+      if (manifest.soundboardId) {
+        setVoiceKind("board")
+        setSelectedBoardId(manifest.soundboardId)
+      } else if (manifest.voicePresetId) {
+        setVoiceKind("preset")
+        setSelectedPresetId(manifest.voicePresetId)
+      } else if (manifest.voiceId?.startsWith("http")) {
+        setVoiceKind("upload")
+        setVoiceSampleUrl(manifest.voiceId)
+        setVoiceSampleName("Voice sample")
+        setVoiceUploadStage("uploaded")
+      }
+      setVoiceUploadRefText(manifest.voiceRefText ?? "")
+      setTalkingMode(manifest.talkingMode)
+      setHeadshotImageUrl(manifest.headshotImageUrl)
+      setSelectedHeadshotPresetId(manifest.headshotPresetId ?? null)
+      if (manifest.headshotImageUrl) {
+        if (manifest.headshotPresetId) {
+          const preset = HEADSHOT_PRESETS.find((p) => p.id === manifest.headshotPresetId)
+          if (preset) {
+            setHeadshotName(preset.displayName)
+            setHeadshotPreviewUrl(headshotPresetImageSrc(preset))
+          } else if (!isPrivateVercelBlobUrlClient(manifest.headshotImageUrl)) {
+            setHeadshotPreviewUrl(manifest.headshotImageUrl)
+            setHeadshotName(manifest.title)
+          }
+        } else {
+          if (!isPrivateVercelBlobUrlClient(manifest.headshotImageUrl)) {
+            setHeadshotPreviewUrl(manifest.headshotImageUrl)
+          }
+          setHeadshotName(manifest.title)
+        }
+      } else {
+        setHeadshotName("")
+      }
+      setBackgroundVideoId(formBackgroundFromManifest(manifest))
+      setCaptionsEnabled(manifest.captionsEnabled !== false)
+      setConsent(manifest.consentAcknowledged)
+      setDraftReady(true)
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [router, searchParams, isSignedIn])
+
+  useEffect(() => {
+    if (!draftReady || stage !== "form" || !isSignedIn) return
+
+    const timer = window.setTimeout(() => {
+      void persistServerDraft(draftManifestIdRef.current)
+    }, 400)
+
+    return () => window.clearTimeout(timer)
+  }, [
+    draftReady,
+    stage,
+    isSignedIn,
+    persistServerDraft,
+    wizardStep,
+    videoTitle,
+    script,
+    voiceKind,
+    selectedPresetId,
+    selectedBoardId,
+    voiceSampleUrl,
+    voiceUploadRefText,
+    talkingMode,
+    headshotImageUrl,
+    headshotName,
+    selectedHeadshotPresetId,
+    backgroundVideoId,
+    captionsEnabled,
+    consent,
+  ])
+
+  useEffect(() => {
+    if (!draftReady || stage !== "form" || !isSignedIn) return
+
+    window.addEventListener("pagehide", flushServerDraft)
+    return () => {
+      window.removeEventListener("pagehide", flushServerDraft)
+      flushServerDraft()
+    }
+  }, [draftReady, stage, isSignedIn, flushServerDraft])
+
+  useEffect(() => {
+    const onTourStep = (e: Event) => {
+      const { stepId, page } = (e as CustomEvent<TourStepChangedDetail>).detail
+      if (page !== "/app/video/new") return
+
+      const nextStep = TOUR_VIDEO_WIZARD_STEP[stepId]
+      if (nextStep) setWizardStep(nextStep)
+
+      const notifyReady = () => {
+        window.dispatchEvent(
+          new CustomEvent(WIZARD_STEP_READY_EVENT, {
+            detail: { stepId },
+          })
+        )
+      }
+      // Double rAF so the wizard panel mounts before the tour measures spotlight.
+      requestAnimationFrame(() => {
+        requestAnimationFrame(notifyReady)
+      })
+    }
+    window.addEventListener(TOUR_STEP_CHANGED_EVENT, onTourStep)
+    return () => window.removeEventListener(TOUR_STEP_CHANGED_EVENT, onTourStep)
+  }, [])
 
   // Revoke voice preview object URL on unmount
   useEffect(() => {
@@ -382,9 +721,37 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
 
   useEffect(() => {
     return () => {
-      if (headshotPreviewUrl.startsWith("blob:")) URL.revokeObjectURL(headshotPreviewUrl)
+      if (headshotBlobRef.current) {
+        URL.revokeObjectURL(headshotBlobRef.current)
+        headshotBlobRef.current = null
+      }
     }
-  }, [headshotPreviewUrl])
+  }, [])
+
+  useEffect(() => {
+    if (!draftReady || !headshotImageUrl || selectedHeadshotPresetId) return
+    if (!isPrivateVercelBlobUrlClient(headshotImageUrl)) return
+    if (headshotPreviewUrl.startsWith("blob:")) return
+
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch(headshotImageUrl)
+        if (!res.ok || cancelled) return
+        const blob = await res.blob()
+        if (cancelled) return
+        const url = URL.createObjectURL(blob)
+        headshotBlobRef.current = url
+        setHeadshotPreviewUrl(url)
+      } catch {
+        // Generation still uses headshotImageUrl; preview may stay blank briefly.
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [draftReady, headshotImageUrl, selectedHeadshotPresetId, headshotPreviewUrl])
 
   async function processHeadshotFile(
     file: File,
@@ -507,9 +874,20 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
       setHeadshotName(meta?.displayName ?? file.name)
       setSelectedHeadshotPresetId(meta?.presetId ?? null)
       setHeadshotPreviewUrl((cur) => {
-        if (cur.startsWith("blob:")) URL.revokeObjectURL(cur)
+        if (headshotBlobRef.current) {
+          URL.revokeObjectURL(headshotBlobRef.current)
+          headshotBlobRef.current = null
+        } else if (cur.startsWith("blob:")) {
+          URL.revokeObjectURL(cur)
+        }
+        if (meta?.presetId) {
+          const preset = HEADSHOT_PRESETS.find((p) => p.id === meta.presetId)
+          if (preset) return headshotPresetImageSrc(preset)
+        }
         if (jpegFile && isPrivateVercelBlobUrlClient(finalUrl)) {
-          return URL.createObjectURL(jpegFile)
+          const blobUrl = URL.createObjectURL(jpegFile)
+          headshotBlobRef.current = blobUrl
+          return blobUrl
         }
         return finalUrl
       })
@@ -523,7 +901,12 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
       setHeadshotName("")
       setSelectedHeadshotPresetId(null)
       setHeadshotPreviewUrl((cur) => {
-        if (cur.startsWith("blob:")) URL.revokeObjectURL(cur)
+        if (headshotBlobRef.current) {
+          URL.revokeObjectURL(headshotBlobRef.current)
+          headshotBlobRef.current = null
+        } else if (cur.startsWith("blob:")) {
+          URL.revokeObjectURL(cur)
+        }
         return ""
       })
       if (headshotInputRef.current) headshotInputRef.current.value = ""
@@ -574,7 +957,6 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
     setHeadshotUploading(true)
 
     const urlToDelete = headshotImageUrl
-    const previewToRevoke = headshotPreviewUrl
 
     try {
       await deleteHeadshotOnServer(urlToDelete).catch(() => {})
@@ -583,7 +965,10 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
       setHeadshotName("")
       setSelectedHeadshotPresetId(null)
       setHeadshotPreviewUrl("")
-      if (previewToRevoke.startsWith("blob:")) URL.revokeObjectURL(previewToRevoke)
+      if (headshotBlobRef.current) {
+        URL.revokeObjectURL(headshotBlobRef.current)
+        headshotBlobRef.current = null
+      }
       if (headshotInputRef.current) headshotInputRef.current.value = ""
       setHeadshotUploading(false)
     }
@@ -591,6 +976,8 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
 
   const openCreditGate = useCallback(
     (manifestId: string, balance: number, required: number) => {
+      setDraftManifestId(manifestId)
+      draftManifestIdRef.current = manifestId
       setCreditGate({ manifestId, balance, required })
       setStage("credit_gate")
     },
@@ -760,6 +1147,8 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
         talkingMode,
         captionsEnabled,
         consentAcknowledged: true as const,
+        ...(selectedHeadshotPresetId ? { headshotPresetId: selectedHeadshotPresetId } : {}),
+        ...(draftManifestId ? { replaceDraftId: draftManifestId } : {}),
       }
 
       const createBody =
@@ -793,6 +1182,8 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
       if (!createRes.ok) throw new Error(created.error ?? "Failed to create video")
 
       const createdId = String(created.id)
+      setDraftManifestId(createdId)
+      draftManifestIdRef.current = createdId
       const cost = videoGenerationCostBananaCredits(script.length)
       const entRes = await fetch("/api/billing/entitlement")
       if (entRes.ok) {
@@ -825,7 +1216,9 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
         balance={creditGate.balance}
         required={creditGate.required}
         manifestId={creditGate.manifestId}
-        returnPath={VIDEO_RETURN_PATH}
+        returnPath={
+          draftManifestId ? videoEditHref(draftManifestId) : "/app/video/new"
+        }
         alternateHref="/app/soundboard/new"
         alternateLabel="Try soundboard (1 credit)"
         onBack={() => {
@@ -872,14 +1265,57 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
 
   const noVoicesAtAll = false // upload tab is always available
 
+  const step1Ready =
+    Boolean(headshotImageUrl) && !headshotUploading && voiceReady && !voiceUploadBusy
+  const step2Ready = Boolean(videoTitle.trim()) && Boolean(script.trim())
+  const canGenerate =
+    isSignedIn === false ||
+    (!noVoicesAtAll && step1Ready && step2Ready && consent)
+
+  function goToWizardStep(step: WizardStep) {
+    setError("")
+    setWizardStep(step)
+    window.scrollTo({ top: 0, behavior: "smooth" })
+  }
+
+  function handleWizardNext() {
+    if (wizardStep === 1 && !step1Ready) {
+      if (!headshotImageUrl) setError("Add a headshot — pick a preset or upload a photo.")
+      else if (!voiceReady) setError("Select a voice to continue.")
+      return
+    }
+    if (wizardStep === 2 && !step2Ready) {
+      if (!videoTitle.trim()) setError("Enter a name for this video.")
+      else setError("Write a script for your video.")
+      return
+    }
+    setError("")
+    goToWizardStep((wizardStep + 1) as WizardStep)
+  }
+
+  function handleWizardBack() {
+    setError("")
+    goToWizardStep((wizardStep - 1) as WizardStep)
+  }
+
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">New Video</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Choose a headshot and layout, pick a voice, then name your video and write the script. Finish with
-          background, captions, and generate.
-        </p>
+    <div className="mx-auto max-w-2xl space-y-5 pb-32 lg:pb-24">
+      <div className="space-y-4">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">New Video</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {wizardStep === 1 && "Pick who appears and how they sound."}
+            {wizardStep === 2 && "Name your video and write what they say."}
+            {wizardStep === 3 && "Pick how the video is framed, then background, captions, and generate."}
+          </p>
+        </div>
+        <VideoWizardStepper
+          current={wizardStep}
+          onStepClick={(step) => {
+            if (step === 1) goToWizardStep(1)
+            else if (step === 2 && step1Ready) goToWizardStep(2)
+          }}
+        />
       </div>
       {noVoicesAtAll && (
         <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-400 space-y-2">
@@ -904,22 +1340,19 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
         </div>
       )}
 
-      {/* Step 1: Headshot & layout */}
+      {wizardStep === 1 && (
+        <>
+      {/* Step 1: Headshot */}
       <Card data-tour="video-headshot" className="border-border/60 bg-card/50">
         <CardContent className="pt-5 space-y-4">
-          <p className="text-sm font-medium">1. Headshot &amp; layout</p>
+          <p className="text-sm font-medium">Headshot</p>
           <p className="text-[11px] text-muted-foreground leading-relaxed">
-            Pick a fictional character preset or upload your own front-facing photo. Some face types
-            aren&apos;t supported yet — if that happens, you&apos;ll see a &quot;not available yet&quot; message
-            instead of a hard error. Try another character or your own photo.
+            Pick a character preset or upload a front-facing photo.
           </p>
 
           <div className="space-y-2">
             <label className="text-xs font-medium text-muted-foreground">Character presets</label>
-            <p className="text-[11px] text-muted-foreground">
-              Tap a face — we&apos;ll fetch it and run the same face check as an upload.
-            </p>
-            <div className="max-h-[min(300px,45vh)] overflow-y-auto pr-1">
+            <div className="max-h-[min(240px,40vh)] overflow-y-auto pr-1 sm:max-h-[min(300px,45vh)]">
               <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 sm:gap-3">
                 {HEADSHOT_PRESETS.map((p) => {
                   const selected = selectedHeadshotPresetId === p.id && Boolean(headshotImageUrl)
@@ -945,9 +1378,6 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
                       <span className="line-clamp-2 text-[10px] font-medium leading-tight sm:text-xs">
                         {p.displayName}
                       </span>
-                      <span className="line-clamp-2 text-[9px] leading-tight text-muted-foreground sm:text-[10px]">
-                        {p.tagline}
-                      </span>
                     </button>
                   )
                 })}
@@ -969,10 +1399,10 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
               onChange={handleHeadshotFileChange}
             />
 
-            {headshotPreviewUrl ? (
+            {headshotImageUrl ? (
               <div className="flex items-center gap-3 rounded-xl border border-border/50 bg-secondary/20 p-3">
                 <img
-                  src={headshotPreviewUrl}
+                  src={headshotDisplayUrl}
                   alt=""
                   className="h-20 w-20 shrink-0 rounded-lg border border-border/40 bg-secondary/30 object-cover object-[center_22%]"
                 />
@@ -1062,54 +1492,26 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
             )}
           </div>
 
-          <div data-tour="video-layout" className="space-y-2">
-            <label className="text-xs text-muted-foreground">Layout</label>
-            <div className="flex rounded-lg border border-border/50 bg-secondary/20 p-0.5">
-              <button
-                type="button"
-                onClick={() => setTalkingMode("full")}
-                className={[
-                  "flex flex-1 items-center justify-center gap-1.5 rounded-md py-2 text-xs font-medium transition-colors",
-                  talkingMode === "full"
-                    ? "bg-card text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground",
-                ].join(" ")}
-              >
-                Full screen
-              </button>
-              <button
-                type="button"
-                onClick={() => setTalkingMode("half")}
-                className={[
-                  "flex flex-1 items-center justify-center gap-1.5 rounded-md py-2 text-xs font-medium transition-colors",
-                  talkingMode === "half"
-                    ? "bg-card text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground",
-                ].join(" ")}
-              >
-                Top half + background
-              </button>
+          <MoreOptions>
+            <p>
+              Some face types aren&apos;t supported yet — if that happens, try another preset or your own
+              photo. We verify every image before sending it to the animator.
+            </p>
+            <div className="grid grid-cols-2 gap-2 pt-1 sm:grid-cols-3">
+              {HEADSHOT_PRESETS.slice(0, 6).map((p) => (
+                <p key={p.id} className="text-[10px] text-muted-foreground">
+                  <span className="font-medium text-foreground/80">{p.displayName}</span> — {p.tagline}
+                </p>
+              ))}
             </div>
-
-            {talkingMode === "half" ? (
-              <p className="text-xs text-muted-foreground">
-                Talking head on top, moving gameplay on the bottom — best for longer scripts so the
-                frame never feels frozen.
-              </p>
-            ) : (
-              <p className="text-xs text-muted-foreground">
-                Full-screen character only. For scripts over ~30 seconds, top-half + background usually
-                looks more alive.
-              </p>
-            )}
-          </div>
+          </MoreOptions>
         </CardContent>
       </Card>
 
-      {/* Step 2: Voice */}
+      {/* Step 1: Voice */}
       <Card data-tour="video-voice-tabs" className="border-border/60 bg-card/50">
         <CardContent className="pt-5 space-y-3">
-          <p className="text-sm font-medium">2. Voice</p>
+          <p className="text-sm font-medium">Voice</p>
 
           {/* Three-way tab bar: stacked on narrow screens so labels are not crushed */}
           <div className="flex flex-col gap-1 rounded-lg border border-border/50 bg-secondary/20 p-1 sm:flex-row sm:gap-0 sm:p-0.5">
@@ -1243,9 +1645,15 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
                   })}
                 </div>
               </div>
-              <div className="rounded-lg border border-border/50 bg-secondary/10 px-3 py-2 text-xs text-muted-foreground">
-                Preset voices use <span className="font-medium text-foreground">ElevenLabs</span>. Use <span className="text-foreground">My soundboards</span> for Replicate F5.
+              <div className="rounded-lg border border-border/50 bg-secondary/10 px-3 py-2 text-xs text-muted-foreground sm:hidden">
+                Preset voices use ElevenLabs — fastest option.
               </div>
+              <MoreOptions className="hidden sm:block">
+                <p>
+                  Preset voices use <span className="font-medium text-foreground">ElevenLabs</span>. Use{" "}
+                  <span className="text-foreground">My soundboards</span> for Replicate F5.
+                </p>
+              </MoreOptions>
             </div>
           )}
 
@@ -1402,23 +1810,24 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
                 <audio src={voiceSamplePreviewUrl} controls className="h-8 w-full" />
               )}
 
-              {/* Reference transcript */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-muted-foreground">
-                  Reference transcript <span className="font-normal opacity-70">(optional — improves similarity)</span>
-                </label>
-                <textarea
-                  value={voiceUploadRefText}
-                  onChange={(e) => setVoiceUploadRefText(e.target.value)}
-                  placeholder="Paste what the voice sample is saying…"
-                  maxLength={1000}
-                  rows={3}
-                  className="w-full rounded-md border border-border/60 bg-secondary/20 px-3 py-2 text-sm outline-none focus:border-primary/60 resize-none"
-                />
-                <p className="text-[11px] text-muted-foreground">
-                  If your sample is someone saying "Hey everyone, welcome back to my channel…", paste that here. The model uses it to match rhythm and pronunciation.
-                </p>
-              </div>
+              <MoreOptions>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">
+                    Reference transcript <span className="font-normal opacity-70">(optional)</span>
+                  </label>
+                  <textarea
+                    value={voiceUploadRefText}
+                    onChange={(e) => setVoiceUploadRefText(e.target.value)}
+                    placeholder="Paste what the voice sample is saying…"
+                    maxLength={1000}
+                    rows={3}
+                    className="w-full rounded-md border border-border/60 bg-secondary/20 px-3 py-2 text-sm outline-none focus:border-primary/60 resize-none"
+                  />
+                  <p className="text-[11px] text-muted-foreground">
+                    Improves rhythm and pronunciation when the sample is someone speaking clearly.
+                  </p>
+                </div>
+              </MoreOptions>
             </div>
           )}
 
@@ -1427,11 +1836,13 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
           )}
         </CardContent>
       </Card>
+        </>
+      )}
 
-      {/* Step 3: Name & script */}
+      {wizardStep === 2 && (
       <Card data-tour="video-script" className="border-border/60 bg-card/50">
-        <CardContent className="pt-5 space-y-3">
-          <p className="text-sm font-medium">3. Name &amp; script</p>
+        <CardContent className="pt-5 space-y-4">
+          <p className="text-sm font-medium">Script</p>
           <div className="space-y-1.5">
             <label className="text-xs text-muted-foreground">Video name</label>
             <input
@@ -1441,10 +1852,24 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
               maxLength={100}
               className="w-full rounded-md border border-border/60 bg-secondary/20 px-3 py-1.5 text-sm outline-none focus:border-primary/60"
             />
-            <p className="text-[11px] text-muted-foreground">
-              Shown on your dashboard and share links (not read aloud).
-            </p>
           </div>
+
+          <div className="space-y-2">
+            <label className="text-xs text-muted-foreground">Start from a template</label>
+            <div className="filter-tabs flex gap-2 overflow-x-auto pb-0.5">
+              {SCRIPT_TEMPLATES.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setScript(t.text)}
+                  className="shrink-0 rounded-full border border-border/50 px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-border hover:text-foreground"
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <div className="space-y-1.5">
             <label className="text-xs text-muted-foreground">Script</label>
             <div className="relative">
@@ -1453,18 +1878,20 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
                 onChange={(e) => setScript(e.target.value)}
                 placeholder="Write what you want the AI to say in your video…"
                 maxLength={2000}
-                rows={6}
+                rows={8}
                 className="w-full rounded-md border border-border/60 bg-secondary/20 px-3 py-2 text-sm outline-none focus:border-primary/60 resize-none"
               />
               <span className="absolute bottom-2 right-3 text-xs text-muted-foreground">
                 {script.length}/2000
               </span>
             </div>
-            <p className="text-[11px] text-muted-foreground flex flex-wrap items-center gap-1.5">
-              <span>
-                Base rate includes the first 500 characters; each additional 500 (or part) adds 1
-                banana credit.
-              </span>
+          </div>
+
+          <MoreOptions>
+            <p>Video name is shown on your dashboard and share links — it is not read aloud.</p>
+            <p className="flex flex-wrap items-center gap-1.5">
+              Base rate includes the first 500 characters; each additional 500 (or part) adds 1 banana
+              credit. Estimated cost for this script:{" "}
               <span className="inline-flex items-center gap-1 text-foreground/90">
                 {formatCurrencyCost(videoExportBananaCredits)}
                 <NextImage
@@ -1476,22 +1903,47 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
                 />
               </span>
             </p>
-          </div>
+          </MoreOptions>
         </CardContent>
       </Card>
+      )}
 
-      {/* Step 4: Background */}
+      {wizardStep === 3 && (
+        <>
+      <Card data-tour="video-layout" className="border-border/60 bg-card/50">
+        <CardContent className="pt-5 space-y-3">
+          <div>
+            <p className="text-sm font-medium">Video layout</p>
+            <p className="mt-0.5 text-[11px] text-muted-foreground">
+              Where your character sits in the frame — not the script or voice.
+            </p>
+          </div>
+          <LayoutOptionPicker value={talkingMode} onChange={setTalkingMode} />
+        </CardContent>
+      </Card>
       <Card data-tour="video-background" className="border-border/60 bg-card/50">
         <CardContent className="pt-5 space-y-3">
-          <p className="text-sm font-medium">4. Background</p>
+          <div>
+            <p className="text-sm font-medium">Background clip</p>
+            {talkingMode === "half" ? (
+              <p className="mt-0.5 text-[11px] text-muted-foreground">
+                The gameplay video that plays under your character in split layout.
+              </p>
+            ) : (
+              <p className="mt-0.5 text-[11px] text-muted-foreground">
+                Only used in split layout — switch above to pick a background clip.
+              </p>
+            )}
+          </div>
           {talkingMode === "half" ? (
             <div className="grid grid-cols-2 gap-3">
               {BACKGROUND_OPTIONS.map((bg) => (
                 <button
                   key={bg.id}
+                  type="button"
                   onClick={() => setBackgroundVideoId(bg.id)}
                   className={[
-                    "rounded-xl border-2 p-4 text-left transition-colors",
+                    "rounded-xl border-2 p-3 text-left transition-colors sm:p-4",
                     backgroundVideoId === bg.id
                       ? "border-primary bg-primary/5"
                       : "border-border/40 hover:border-border/80",
@@ -1507,23 +1959,22 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
               ))}
             </div>
           ) : (
-            <p className="text-xs text-muted-foreground">
-              Full-screen mode is selected, so background is not used.
+            <p className="rounded-lg border border-border/40 bg-secondary/10 px-3 py-2.5 text-xs text-muted-foreground">
+              Full-screen layout has no background clip — your character takes up the whole frame.
             </p>
           )}
         </CardContent>
       </Card>
 
-      {/* Step 5: Captions */}
       <Card data-tour="video-captions" className="border-border/60 bg-card/50">
         <CardContent className="pt-5 space-y-3">
-          <p className="text-sm font-medium">5. Captions</p>
+          <p className="text-sm font-medium">Captions</p>
           <div className="flex rounded-lg border border-border/50 p-0.5 bg-secondary/20">
             <button
               type="button"
               onClick={() => setCaptionsEnabled(true)}
               className={[
-                "flex flex-1 items-center justify-center gap-1.5 rounded-md py-2 text-xs font-medium transition-colors",
+                "flex flex-1 items-center justify-center gap-1.5 rounded-md py-2.5 text-xs font-medium transition-colors sm:py-2",
                 captionsEnabled
                   ? "bg-card text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground",
@@ -1535,7 +1986,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
               type="button"
               onClick={() => setCaptionsEnabled(false)}
               className={[
-                "flex flex-1 items-center justify-center gap-1.5 rounded-md py-2 text-xs font-medium transition-colors",
+                "flex flex-1 items-center justify-center gap-1.5 rounded-md py-2.5 text-xs font-medium transition-colors sm:py-2",
                 !captionsEnabled
                   ? "bg-card text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground",
@@ -1544,16 +1995,15 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
               Captions off
             </button>
           </div>
-          <p className="text-xs text-muted-foreground">
-            Full-screen talking head places captions at the bottom when enabled.
-          </p>
+          <MoreOptions>
+            <p>Full-screen talking head places captions at the bottom when enabled.</p>
+          </MoreOptions>
         </CardContent>
       </Card>
 
-      {/* Step 6: Consent */}
       <Card className="border-border/60 bg-card/50">
         <CardContent className="pt-5">
-          <p className="text-sm font-medium mb-3">6. Consent</p>
+          <p className="text-sm font-medium mb-3">Consent</p>
           <label className="flex cursor-pointer items-start gap-3 text-sm">
             <input
               type="checkbox"
@@ -1579,75 +2029,59 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
         </CardContent>
       </Card>
 
-      <Card className="border-border/60 bg-card/50">
-        <CardContent className="pt-5 space-y-3">
-          <div className="flex items-center gap-2">
-            <p className="text-sm font-medium">Current selections</p>
-            <span title="Quick check of the values that will be sent when you click Generate.">
-              <Info className="h-4 w-4 text-muted-foreground" />
+      <MoreOptions label="Review selections">
+        <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
+          <p>
+            Video name:{" "}
+            <span className="text-foreground">{videoTitle.trim() || "Not set"}</span>
+          </p>
+          <p>
+            Script:{" "}
+            <span className="text-foreground">
+              {script.trim()
+                ? `${script.trim().slice(0, 80)}${script.trim().length > 80 ? "..." : ""}`
+                : "Not set"}
             </span>
-          </div>
-          <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
-            <p>
-              Video name:{" "}
-              <span className="text-foreground">
-                {videoTitle.trim() || "Not set"}
-              </span>
-            </p>
-            <p>
-              Script:{" "}
-              <span className="text-foreground">
-                {script.trim() ? `${script.trim().slice(0, 80)}${script.trim().length > 80 ? "..." : ""}` : "Not set"}
-              </span>
-            </p>
-            <p>
-              Voice source:{" "}
-              <span className="text-foreground">
-                {voiceKind === "preset"
-                  ? selectedPreset
-                    ? `Preset - ${selectedPreset.label}`
-                    : "Preset - none selected"
-                  : voiceKind === "upload"
+          </p>
+          <p>
+            Voice:{" "}
+            <span className="text-foreground">
+              {voiceKind === "preset"
+                ? selectedPreset
+                  ? `Preset — ${selectedPreset.label}`
+                  : "Preset — none"
+                : voiceKind === "upload"
                   ? voiceSampleUrl
-                    ? `Upload - ${voiceSampleName || "sample"}`
-                    : "Upload - not uploaded"
+                    ? `Upload — ${voiceSampleName || "sample"}`
+                    : "Upload — none"
                   : selectedBoard
-                    ? `Soundboard - ${selectedBoard.title}`
-                    : "Soundboard - none selected"}
-              </span>
-            </p>
-            <p>
-              Voice quality:{" "}
-              <span className="text-foreground">
-                {voiceKind === "preset"
-                  ? "Great (ElevenLabs)"
-                  : selectedBoard?.ttsTier === "elevenlabs"
-                    ? "Great (ElevenLabs via board)"
-                    : "Good (Replicate via board)"}
-              </span>
-            </p>
-            <p>
-              Background:{" "}
-              <span className="text-foreground">
-                {formatBackgroundForDisplay(talkingMode, backgroundVideoId)}
-              </span>
-            </p>
-            <p>
-              Layout:{" "}
-              <span className="text-foreground">
-                {talkingMode === "half" ? "Top half + background" : "Full screen"}
-              </span>
-            </p>
-            <p>
-              Captions:{" "}
-              <span className="text-foreground">{captionsEnabled ? "On" : "Off"}</span>
-            </p>
-            <p>
-              Headshot: <span className="text-foreground">{headshotName || "Not uploaded"}</span>
-            </p>
-          </div>
-        </CardContent>
-      </Card>
+                    ? `Soundboard — ${selectedBoard.title}`
+                    : "Soundboard — none"}
+            </span>
+          </p>
+          <p>
+            Headshot: <span className="text-foreground">{headshotName || "Not set"}</span>
+          </p>
+          <p>
+            Layout:{" "}
+            <span className="text-foreground">
+              {talkingMode === "half" ? "Split screen" : "Full screen"}
+            </span>
+          </p>
+          <p>
+            Background:{" "}
+            <span className="text-foreground">
+              {formatBackgroundForDisplay(talkingMode, backgroundVideoId)}
+            </span>
+          </p>
+          <p>
+            Captions:{" "}
+            <span className="text-foreground">{captionsEnabled ? "On" : "Off"}</span>
+          </p>
+        </div>
+      </MoreOptions>
+        </>
+      )}
 
       {error && (
         <p
@@ -1661,32 +2095,16 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
         </p>
       )}
 
-      <Button
-        data-tour="video-generate-btn"
-        onClick={handleGenerate}
-        disabled={
-          isSignedIn === false
-            ? false
-            : noVoicesAtAll ||
-              !videoTitle.trim() ||
-              !script.trim() ||
-              !voiceReady ||
-              !consent ||
-              !headshotImageUrl ||
-              headshotUploading ||
-              voiceUploadBusy
-        }
-        className="group h-14 w-full justify-between rounded-2xl px-5 text-base font-semibold shadow-lg shadow-primary/20 transition-all hover:shadow-xl hover:shadow-primary/30 disabled:shadow-none"
-        size="lg"
-      >
-        <span className="tracking-tight">
-          Generate Video
-        </span>
-        <span className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-black/15 px-3 py-1.5 text-sm font-bold backdrop-blur-sm">
-          <img src={currencyIconSrc()} alt={currencyIconAlt()} className="h-7 w-7 object-contain" />
-          {formatCreditBadgeAmount(videoExportBananaCredits)}
-        </span>
-      </Button>
+      <VideoWizardFooter
+        step={wizardStep}
+        canGoNext={wizardStep === 1 ? step1Ready : step2Ready}
+        canGenerate={canGenerate}
+        creditCost={videoExportBananaCredits}
+        nextLabel={wizardStep === 1 ? "Continue to script" : "Continue to look"}
+        onBack={handleWizardBack}
+        onNext={handleWizardNext}
+        onGenerate={handleGenerate}
+      />
     </div>
   )
 }

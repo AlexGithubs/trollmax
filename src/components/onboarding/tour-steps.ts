@@ -64,7 +64,7 @@ export const TOUR_STEPS: TourStep[] = [
   },
   {
     id: "dashboard-video-card",
-    page: null,
+    page: "/app",
     targetSelector: '[data-tour="dashboard-video-card"]',
     title: "Make Your First Video",
     content: "Turn any script into a talking-head video — perfect for TikTok, Reels, and Shorts.",
@@ -79,9 +79,9 @@ export const TOUR_STEPS: TourStep[] = [
     id: "video-headshot",
     page: "/app/video/new",
     targetSelector: '[data-tour="video-headshot"]',
-    title: "1. Headshot & Layout",
+    title: "Step 1 — Who's talking?",
     content:
-      "Pick a preset portrait or upload/drag your own front-facing photo, then choose full-screen or top-half + gameplay layout.",
+      "Pick a preset portrait or upload your own front-facing photo. Then choose a voice below before continuing.",
     placement: "top",
     spotlightPadding: 8,
   },
@@ -89,8 +89,9 @@ export const TOUR_STEPS: TourStep[] = [
     id: "video-voice-tabs",
     page: "/app/video/new",
     targetSelector: '[data-tour="video-voice-tabs"]',
-    title: "2. Pick a Voice",
-    content: "Choose a preset AI voice, use a cloned soundboard voice, or upload/drag your own audio sample. Presets are fastest; uploading takes a couple extra minutes.",
+    title: "Pick a voice",
+    content:
+      "Preset AI voices are fastest. Use a cloned soundboard or upload your own sample — tap Continue when both headshot and voice are set.",
     placement: "bottom",
     spotlightPadding: 6,
   },
@@ -98,7 +99,7 @@ export const TOUR_STEPS: TourStep[] = [
     id: "video-preset-grid",
     page: "/app/video/new",
     targetSelector: '[data-tour="video-preset-grid"]',
-    title: "Browse Voice Presets",
+    title: "Browse voice presets",
     content: "Tap a card to select and preview. Tap again to stop. Use the filters to browse by category.",
     placement: "top",
     spotlightPadding: 8,
@@ -107,9 +108,9 @@ export const TOUR_STEPS: TourStep[] = [
     id: "video-script",
     page: "/app/video/new",
     targetSelector: '[data-tour="video-script"]',
-    title: "3. Name & Script",
+    title: "Step 2 — Script",
     content:
-      "Name your video and write the script the AI reads aloud. Up to 2000 chars — first 500 included, +1 credit per extra 500.",
+      "Name your video, pick a template chip to get started, then edit the script. Up to 2000 chars.",
     placement: "bottom",
     spotlightPadding: 8,
   },
@@ -117,8 +118,9 @@ export const TOUR_STEPS: TourStep[] = [
     id: "video-layout",
     page: "/app/video/new",
     targetSelector: '[data-tour="video-layout"]',
-    title: "Layout",
-    content: "Full screen = face only. Top half + background = face on top, viral game clip below — the classic brainrot look.",
+    title: "Step 3 — Video layout",
+    content:
+      "Pick full screen (face only) or split screen (face on top, gameplay clip below). Each option shows a mini preview of the frame.",
     placement: "top",
     spotlightPadding: 6,
   },
@@ -126,8 +128,9 @@ export const TOUR_STEPS: TourStep[] = [
     id: "video-background",
     page: "/app/video/new",
     targetSelector: '[data-tour="video-background"]',
-    title: "4. Background",
-    content: "The clip that plays behind you in split-layout mode. Minecraft and Subway Surfers are the go-to brainrot picks.",
+    title: "Background",
+    content:
+      "The clip that plays behind you in split-layout mode. Minecraft and Subway Surfers are the go-to brainrot picks.",
     placement: "top",
     spotlightPadding: 8,
   },
@@ -135,8 +138,9 @@ export const TOUR_STEPS: TourStep[] = [
     id: "video-captions",
     page: "/app/video/new",
     targetSelector: '[data-tour="video-captions"]',
-    title: "5. Captions",
-    content: "Auto-transcribes your script and burns captions in. Boosts watch time significantly — leave it on.",
+    title: "Captions",
+    content:
+      "Auto-transcribes your script and burns captions in. Boosts watch time — leave it on unless you have a reason not to.",
     placement: "top",
     spotlightPadding: 6,
   },
@@ -145,7 +149,8 @@ export const TOUR_STEPS: TourStep[] = [
     page: "/app/video/new",
     targetSelector: '[data-tour="video-generate-btn"]',
     title: "Generate!",
-    content: "Hit Generate when everything's set. Credit cost updates live. Takes 1–3 min, then you're redirected to your video.",
+    content:
+      "Acknowledge consent, then hit Generate. You'll sign in first if needed. Takes 1–3 min, then you're redirected to your video.",
     placement: "top",
     spotlightPadding: 8,
   },
@@ -223,9 +228,124 @@ export const TOUR_STEPS: TourStep[] = [
     targetSelector: null,
     title: "You're all set!",
     content:
-      "That's the full TROLLMAX experience. Go create something unhinged. Tap the ? icon in the top bar (phone) or “Tour guide” in the sidebar (desktop) anytime to run this again.",
+      "That's the full TROLLMAX experience. Go create something unhinged — we'll bring you back to where you left off if you started mid-flow.",
     placement: "center",
     navigateTo: "/app",
     navigateLabel: "Go to Dashboard",
   },
 ]
+
+export type TourSegmentKind = "full" | "video" | "soundboard"
+
+export type TourMode = "full" | "contextual"
+
+export interface TourRuntimeState {
+  active: boolean
+  step: number
+  mode?: TourMode
+  segmentStart?: number
+  segmentEnd?: number
+}
+
+function tourStepIndex(id: string): number {
+  return TOUR_STEPS.findIndex((s) => s.id === id)
+}
+
+export function tourSegmentBounds(kind: TourSegmentKind): { start: number; end: number } {
+  switch (kind) {
+    case "video":
+      return {
+        start: tourStepIndex("video-headshot"),
+        end: tourStepIndex("video-generate-btn"),
+      }
+    case "soundboard":
+      return {
+        start: tourStepIndex("sb-voice-source"),
+        end: tourStepIndex("sb-generate-btn"),
+      }
+    case "full":
+    default:
+      return { start: 0, end: TOUR_STEPS.length - 1 }
+  }
+}
+
+export function tourSegmentKindForPath(pathname: string): TourSegmentKind {
+  if (pathname.startsWith("/app/video/new")) return "video"
+  if (pathname.startsWith("/app/soundboard/new")) return "soundboard"
+  return "full"
+}
+
+export function canOfferPageTour(pathname: string): boolean {
+  const kind = tourSegmentKindForPath(pathname)
+  return kind === "video" || kind === "soundboard"
+}
+
+export function pageTourStepCount(pathname: string): number {
+  const kind = tourSegmentKindForPath(pathname)
+  const { start, end } = tourSegmentBounds(kind)
+  return end - start + 1
+}
+
+export function resolveTourMode(state: TourRuntimeState): TourMode {
+  if (state.mode) return state.mode
+  const full = tourSegmentBounds("full")
+  if (state.segmentStart === full.start && state.segmentEnd === full.end) return "full"
+  return "contextual"
+}
+
+export function tourModeLabel(mode: TourMode, pathname: string): string {
+  if (mode === "full") return "Full app tour"
+  if (pathname.startsWith("/app/video/new")) return "Video creator tour"
+  if (pathname.startsWith("/app/soundboard/new")) return "Soundboard tour"
+  return "Page tour"
+}
+
+export function createFullTourState(): TourRuntimeState {
+  const { start, end } = tourSegmentBounds("full")
+  return {
+    active: true,
+    step: start,
+    mode: "full",
+    segmentStart: start,
+    segmentEnd: end,
+  }
+}
+
+export function tourStartStepForVideoWizard(wizardStep: 1 | 2 | 3): number {
+  const id =
+    wizardStep === 2 ? "video-script" : wizardStep === 3 ? "video-layout" : "video-headshot"
+  return tourStepIndex(id)
+}
+
+/** Contextual tour: on create pages, only tour that flow — not dashboard / other products. */
+export function createContextualTourState(
+  pathname: string,
+  options?: { wizardStep?: 1 | 2 | 3 }
+): TourRuntimeState {
+  const kind = tourSegmentKindForPath(pathname)
+  const { start, end } = tourSegmentBounds(kind)
+  let step = start
+
+  if (kind === "video" && options?.wizardStep) {
+    const suggested = tourStartStepForVideoWizard(options.wizardStep)
+    if (suggested >= start && suggested <= end) step = suggested
+  }
+
+  return { active: true, step, mode: "contextual", segmentStart: start, segmentEnd: end }
+}
+
+export function tourDisplayStep(state: TourRuntimeState): {
+  current: number
+  total: number
+  isFirst: boolean
+  isLast: boolean
+} {
+  const start = state.segmentStart ?? 0
+  const end = state.segmentEnd ?? TOUR_STEPS.length - 1
+  return {
+    current: state.step - start + 1,
+    total: end - start + 1,
+    isFirst: state.step <= start,
+    isLast: state.step >= end,
+  }
+}

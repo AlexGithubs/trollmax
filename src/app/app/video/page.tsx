@@ -8,6 +8,7 @@ import { Video, Plus, Share2 } from "lucide-react"
 import type { VideoManifest } from "@/lib/manifests/types"
 import { formatVideoListSubtitle } from "@/lib/video/backgrounds"
 import { DeleteVideoButton } from "@/components/video/DeleteVideoButton"
+import { VIDEO_NEW_HREF, videoEditHref } from "@/lib/client/video-draft"
 
 export const metadata = { title: "Videos — TROLLMAX" }
 
@@ -71,7 +72,7 @@ export default async function VideoListPage() {
           </p>
         </div>
         <Button asChild size="sm">
-          <Link href="/app/video/new">
+          <Link href={VIDEO_NEW_HREF}>
             <Plus className="mr-1.5 h-4 w-4" />
             New
           </Link>
@@ -97,7 +98,11 @@ export default async function VideoListPage() {
                     <Video className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
                     <div className="min-w-0 flex-1 overflow-hidden">
                       <Link
-                        href={`/app/video/${video.id}`}
+                        href={
+                          video.status === "draft"
+                            ? videoEditHref(video.id)
+                            : `/app/video/${video.id}`
+                        }
                         className="block w-full min-w-0 truncate font-semibold hover:underline"
                       >
                         {video.title}
@@ -118,9 +123,15 @@ export default async function VideoListPage() {
                     {new Date(video.updatedAt).toLocaleDateString()}
                   </p>
                   <div className="flex gap-2">
-                    <Button asChild variant="outline" size="sm" className="flex-1 text-xs">
-                      <Link href={`/app/video/${video.id}`}>View</Link>
-                    </Button>
+                    {video.status === "draft" ? (
+                      <Button asChild variant="outline" size="sm" className="flex-1 text-xs">
+                        <Link href={videoEditHref(video.id)}>Continue</Link>
+                      </Button>
+                    ) : (
+                      <Button asChild variant="outline" size="sm" className="flex-1 text-xs">
+                        <Link href={`/app/video/${video.id}`}>View</Link>
+                      </Button>
+                    )}
                     {video.status === "complete" && (
                       <Button asChild variant="outline" size="sm" className="flex-1 text-xs">
                         <Link href={`/v/${video.id}`} target="_blank">

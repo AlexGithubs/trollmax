@@ -10,6 +10,7 @@ import { ShareMenu } from "@/components/share/ShareMenu"
 import { VideoDownloadButton } from "@/components/video/VideoDownloadButton"
 import { DeleteVideoButton } from "@/components/video/DeleteVideoButton"
 import { formatVideoListSubtitle, formatBackgroundForDisplay } from "@/lib/video/backgrounds"
+import { videoEditHref } from "@/lib/client/video-draft"
 import { getSiteBaseUrl } from "@/lib/site-url"
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
@@ -166,8 +167,11 @@ export default async function ManageVideoPage({
       )}
 
       {manifest.status === "draft" && (
-        <div className="rounded-xl border border-border/40 bg-card/30 p-8 text-center text-sm text-muted-foreground">
-          This video hasn&apos;t been generated yet.
+        <div className="flex flex-col items-center gap-3 rounded-xl border border-border/40 bg-card/30 p-8 text-center">
+          <p className="text-sm text-muted-foreground">This video hasn&apos;t been generated yet.</p>
+          <Button asChild size="sm">
+            <Link href={videoEditHref(id)}>Continue editing</Link>
+          </Button>
         </div>
       )}
 

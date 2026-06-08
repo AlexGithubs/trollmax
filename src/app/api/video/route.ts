@@ -30,6 +30,8 @@ const CreateSchema = z
     soundboardId: z.string().min(1).optional(),
     voiceRefText: z.string().max(1000).optional(),
     ttsTier: TtsTierSchema.optional(),
+    headshotPresetId: z.string().min(1).optional(),
+    replaceDraftId: z.string().min(1).optional(),
   })
   .superRefine((data, ctx) => {
     const hasPreset = Boolean(data.voicePresetId?.trim())
@@ -162,7 +164,25 @@ export async function POST(req: Request) {
   }
 
   const now = new Date().toISOString()
-  const id = nanoid(10)
+  const store = getManifestStore()
+  let id = nanoid(10)
+  let createdAt = now
+
+  if (parsed.data.replaceDraftId) {
+    const replaceRaw = await store.get(`video:${parsed.data.replaceDraftId}`)
+    if (!replaceRaw) {
+      return NextResponse.json({ error: "Draft not found" }, { status: 404 })
+    }
+    const existing = JSON.parse(replaceRaw) as VideoManifest
+    if (existing.ownerId !== user.id) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+    }
+    if (existing.status !== "draft") {
+      return NextResponse.json({ error: "Only draft videos can be replaced." }, { status: 409 })
+    }
+    id = existing.id
+    createdAt = existing.createdAt
+  }
 
   const manifest: VideoManifest = {
     id,
@@ -175,6 +195,9 @@ export async function POST(req: Request) {
     ...(voiceRefText ? { voiceRefText } : {}),
     ...(voicePresetId ? { voicePresetId } : {}),
     ...(soundboardId ? { soundboardId } : {}),
+    ...(parsed.data.headshotPresetId?.trim()
+      ? { headshotPresetId: parsed.data.headshotPresetId.trim() }
+      : {}),
     audioUrl: "",
     backgroundVideoId: backgroundVideoIdForManifest(talkingMode, backgroundVideoId),
     headshotImageUrl,
@@ -185,13 +208,14 @@ export async function POST(req: Request) {
     isPublic: true,
     consentAcknowledged: true,
     ownerId: user.id,
-    createdAt: now,
+    createdAt,
     updatedAt: now,
   }
 
-  const store = getManifestStore()
   await store.set(`video:${id}`, JSON.stringify(manifest))
-  await store.sadd(`user:${user.id}:videos`, id)
+  if (!parsed.data.replaceDraftId) {
+    await store.sadd(`user:${user.id}:videos`, id)
+  }
 
-  return NextResponse.json(manifest, { status: 201 })
+  return NextResponse.json(manifest, { status: parsed.data.replaceDraftId ? 200 : 201 })
 }

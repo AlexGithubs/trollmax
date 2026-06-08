@@ -4,13 +4,25 @@ import { useState, useEffect, useCallback, useRef } from "react"
 import { createPortal } from "react-dom"
 import { usePathname, useRouter } from "next/navigation"
 import { useUser } from "@clerk/nextjs"
-import { X, ChevronLeft, ChevronRight, HelpCircle } from "lucide-react"
-import { TOUR_STEPS, type TourStep } from "./tour-steps"
+import { X, ChevronLeft, ChevronRight } from "lucide-react"
+import { TOUR_STEPS, tourDisplayStep, type TourStep, type TourRuntimeState } from "./tour-steps"
+import { consumeTourResumeContext } from "@/lib/client/tour-resume"
+import { launchTour, saveTourState, TOUR_START_EVENT, TOUR_STORAGE_KEY } from "@/lib/client/tour-launch"
+import {
+  TOUR_STEP_CHANGED_EVENT,
+  WIZARD_STEP_READY_EVENT,
+  tourStepNeedsVideoWizardSync,
+  type WizardStepReadyDetail,
+} from "@/lib/client/video-form-draft"
 
-export const STORAGE_KEY = "trollmax_tour_v1"
+export { TourGuideButton, TourRestartButton } from "./TourGuideButton"
+export { saveTourState as saveState, TOUR_STORAGE_KEY as STORAGE_KEY } from "@/lib/client/tour-launch"
 
 // Wait times before measuring element position after a step change
-const SCROLL_SETTLE_MS = 380  // when the page actually needs to scroll
+const SCROLL_SETTLE_MS = 380 // when the page actually needs to scroll
+const SLIDE_TRANSITION = "top 0.32s cubic-bezier(0.4, 0, 0.2, 1), left 0.32s cubic-bezier(0.4, 0, 0.2, 1)"
+const SPOT_TRANSITION =
+  "x 0.32s cubic-bezier(0.4, 0, 0.2, 1), y 0.32s cubic-bezier(0.4, 0, 0.2, 1), width 0.32s cubic-bezier(0.4, 0, 0.2, 1), height 0.32s cubic-bezier(0.4, 0, 0.2, 1)"
 /** True if the element's centre is already within the visible viewport */
 function isInViewport(el: Element): boolean {
   const r = el.getBoundingClientRect()
@@ -18,27 +30,20 @@ function isInViewport(el: Element): boolean {
   return r.top >= -60 && r.bottom <= window.innerHeight + 60
 }
 
-interface TourState {
-  active: boolean
-  step: number
-}
+interface TourState extends TourRuntimeState {}
 
 function loadState(): TourState {
   if (typeof window === "undefined") return { active: false, step: 0 }
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = localStorage.getItem(TOUR_STORAGE_KEY)
     if (raw === null) return { active: false, step: 0 }
-    return JSON.parse(raw) as TourState
+    const parsed = JSON.parse(raw) as TourState
+    if (typeof parsed.active !== "boolean" || typeof parsed.step !== "number") {
+      return { active: false, step: 0 }
+    }
+    return parsed
   } catch {
     return { active: false, step: 0 }
-  }
-}
-
-export function saveState(state: TourState) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
-  } catch {
-    // ignore
   }
 }
 
@@ -51,23 +56,45 @@ interface SpotlightRect {
   height: number
 }
 
-function getSpotlightRect(selector: string | null, padding = 8): SpotlightRect | null {
+function findVisibleTarget(selector: string | null): Element | null {
   if (!selector) return null
-  // Use querySelectorAll so we find the first *visible* match.
-  // Sidebar items have display:none on mobile — their rects are all-zero.
-  const els = document.querySelectorAll(selector)
-  for (const el of els) {
+  for (const el of document.querySelectorAll(selector)) {
     const r = el.getBoundingClientRect()
-    if (r.width > 0 || r.height > 0) {
-      return {
-        top: r.top - padding,
-        left: r.left - padding,
-        width: r.width + padding * 2,
-        height: r.height + padding * 2,
-      }
-    }
+    if (r.width > 1 && r.height > 1) return el
   }
   return null
+}
+
+function getSpotlightRect(selector: string | null, padding = 8): SpotlightRect | null {
+  const el = findVisibleTarget(selector)
+  if (!el) return null
+  const r = el.getBoundingClientRect()
+  return {
+    top: r.top - padding,
+    left: r.left - padding,
+    width: r.width + padding * 2,
+    height: r.height + padding * 2,
+  }
+}
+
+function waitForWizardStepReady(stepId: string, timeoutMs = 900): Promise<void> {
+  return new Promise((resolve) => {
+    const onReady = (e: Event) => {
+      const detail = (e as CustomEvent<WizardStepReadyDetail>).detail
+      if (detail.stepId === stepId) done()
+    }
+    const timer = setTimeout(done, timeoutMs)
+    function done() {
+      clearTimeout(timer)
+      window.removeEventListener(WIZARD_STEP_READY_EVENT, onReady)
+      resolve()
+    }
+    window.addEventListener(WIZARD_STEP_READY_EVENT, onReady)
+  })
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 interface TooltipPosition {
@@ -156,7 +183,6 @@ export function OnboardingTour() {
 
   const [spotRect, setSpotRect] = useState<SpotlightRect | null>(null)
   const [tooltipPos, setTooltipPos] = useState<TooltipPosition>({ top: 0, left: 0 })
-  const [cardVisible, setCardVisible] = useState(false)
 
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const rafRef = useRef<number | null>(null)
@@ -174,7 +200,7 @@ export function OnboardingTour() {
   useEffect(() => {
     if (!mounted || !isLoaded) return
 
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = localStorage.getItem(TOUR_STORAGE_KEY)
 
     if (raw !== null) {
       try {
@@ -185,10 +211,9 @@ export function OnboardingTour() {
       return
     }
 
-    if (pathname?.startsWith("/app")) {
-      const ns: TourState = { active: true, step: 0 }
+    if (pathname === "/app" || pathname === "/app/") {
+      const ns = launchTour("full", pathname)
       setState(ns)
-      saveState(ns)
     }
   }, [mounted, isLoaded, pathname])
 
@@ -198,24 +223,31 @@ export function OnboardingTour() {
       const detail = (e as CustomEvent<TourState>).detail
       setState(detail)
     }
-    window.addEventListener("trollmax:start-tour", handler)
-    return () => window.removeEventListener("trollmax:start-tour", handler)
+    window.addEventListener(TOUR_START_EVENT, handler)
+    return () => window.removeEventListener(TOUR_START_EVENT, handler)
   }, [])
 
   const currentStep = TOUR_STEPS[state.step] ?? null
   const isOnCorrectPage = currentStep?.page === null || currentStep?.page === pathname
 
-  // ── Measure + reveal card ───────────────────────────────────────────────────
-  const measureAndShow = useCallback(() => {
-    if (!currentStep || !isOnCorrectPage) return
+  const isTransitionStep = Boolean(currentStep?.page && !isOnCorrectPage)
+
+  const layoutForStep = useCallback(() => {
+    if (!currentStep) return
+
+    if (isTransitionStep) {
+      setSpotRect(null)
+      setTooltipPos(computeTooltipPosition(null, "center"))
+      return
+    }
+
     const spot = getSpotlightRect(
       currentStep.targetSelector,
       currentStep.spotlightPadding ?? 8
     )
     setSpotRect(spot)
     setTooltipPos(computeTooltipPosition(spot, currentStep.placement))
-    setCardVisible(true)
-  }, [currentStep, isOnCorrectPage])
+  }, [currentStep, isTransitionStep])
 
   // ── Step change ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -223,74 +255,75 @@ export function OnboardingTour() {
     if (timerRef.current) clearTimeout(timerRef.current)
     if (rafRef.current) cancelAnimationFrame(rafRef.current)
 
-    // Wrong page: quick fade to centered transition card.
-    if (!isOnCorrectPage) {
-      setCardVisible(false)
-      timerRef.current = setTimeout(() => {
-        setSpotRect(null)
-        setTooltipPos(computeTooltipPosition(null, "center"))
-        setCardVisible(true)
-      }, 160)
-      return
-    }
+    let cancelled = false
 
-    // Correct page: NEVER fade the card — it stays fully visible.
-    // For elements already on screen the spotlight slides instantly.
-    // For elements off-screen we scroll smoothly then update positions;
-    // the card remains visible at the old position during the scroll and
-    // glides to the new one once we measure.
-
-    // Use querySelectorAll so we skip hidden sidebar elements on mobile
-    let targetEl: Element | null = null
-    if (currentStep.targetSelector) {
-      for (const el of document.querySelectorAll(currentStep.targetSelector)) {
-        const r = el.getBoundingClientRect()
-        if (r.width > 0 || r.height > 0) { targetEl = el; break }
+    if (isTransitionStep) {
+      layoutForStep()
+      return () => {
+        cancelled = true
       }
     }
 
-    const isMobile = window.innerWidth < DESKTOP_BREAKPOINT
+    async function revealTarget() {
+      if (tourStepNeedsVideoWizardSync(currentStep!.id, currentStep!.page)) {
+        window.dispatchEvent(
+          new CustomEvent(TOUR_STEP_CHANGED_EVENT, {
+            detail: { stepId: currentStep!.id, page: currentStep!.page },
+          })
+        )
+        await waitForWizardStepReady(currentStep!.id)
+      }
 
-    if (targetEl) {
-      const rect = targetEl.getBoundingClientRect()
-      if (isMobile) {
-        // On mobile, scroll so the element TOP sits just below the sticky header.
-        // This keeps the element's beginning visible while the card sits at the bottom.
-        const desiredTop = MOBILE_HEADER_H + 12
-        const delta = rect.top - desiredTop
-        if (Math.abs(delta) > 40) {
-          window.scrollTo({ top: Math.max(0, window.scrollY + delta), behavior: "smooth" })
-          timerRef.current = setTimeout(() => {
-            rafRef.current = requestAnimationFrame(measureAndShow)
-          }, SCROLL_SETTLE_MS)
-        } else {
-          rafRef.current = requestAnimationFrame(measureAndShow)
+      if (cancelled) return
+
+      let targetEl = findVisibleTarget(currentStep!.targetSelector)
+      for (let attempt = 0; attempt < 10 && !targetEl && currentStep!.targetSelector; attempt++) {
+        await delay(50)
+        if (cancelled) return
+        targetEl = findVisibleTarget(currentStep!.targetSelector)
+      }
+
+      if (cancelled) return
+
+      const isMobile = window.innerWidth < DESKTOP_BREAKPOINT
+
+      if (targetEl) {
+        const rect = targetEl.getBoundingClientRect()
+        if (isMobile) {
+          const desiredTop = MOBILE_HEADER_H + 12
+          const delta = rect.top - desiredTop
+          if (Math.abs(delta) > 40) {
+            window.scrollTo({ top: Math.max(0, window.scrollY + delta), behavior: "smooth" })
+            await delay(SCROLL_SETTLE_MS)
+            if (cancelled) return
+          }
+        } else if (!isInViewport(targetEl)) {
+          targetEl.scrollIntoView({ behavior: "smooth", block: "center" })
+          await delay(SCROLL_SETTLE_MS)
+          if (cancelled) return
         }
-      } else if (!isInViewport(targetEl)) {
-        targetEl.scrollIntoView({ behavior: "smooth", block: "center" })
-        timerRef.current = setTimeout(() => {
-          rafRef.current = requestAnimationFrame(measureAndShow)
-        }, SCROLL_SETTLE_MS)
-      } else {
-        rafRef.current = requestAnimationFrame(measureAndShow)
       }
-    } else {
-      rafRef.current = requestAnimationFrame(measureAndShow)
+
+      if (cancelled) return
+      rafRef.current = requestAnimationFrame(layoutForStep)
     }
+
+    void revealTarget()
 
     return () => {
+      cancelled = true
       if (timerRef.current) clearTimeout(timerRef.current)
       if (rafRef.current) cancelAnimationFrame(rafRef.current)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.step, mounted, state.active, isOnCorrectPage])
+  }, [state.step, mounted, state.active, isOnCorrectPage, isTransitionStep])
 
   // ── Reposition on resize / scroll ──────────────────────────────────────────
   useEffect(() => {
-    if (!state.active || !cardVisible) return
+    if (!state.active) return
     const handle = () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current)
-      rafRef.current = requestAnimationFrame(measureAndShow)
+      rafRef.current = requestAnimationFrame(layoutForStep)
     }
     window.addEventListener("resize", handle, { passive: true })
     window.addEventListener("scroll", handle, { passive: true, capture: true })
@@ -298,7 +331,7 @@ export function OnboardingTour() {
       window.removeEventListener("resize", handle)
       window.removeEventListener("scroll", handle, { capture: true } as EventListenerOptions)
     }
-  }, [state.active, cardVisible, measureAndShow])
+  }, [state.active, layoutForStep])
 
   // ── Keyboard navigation ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -320,9 +353,14 @@ export function OnboardingTour() {
     if (!target) { pendingStepRef.current = null; return }
     // Advance once the right page has loaded (page-agnostic steps advance immediately)
     if (target.page === null || target.page === pathname) {
-      const ns: TourState = { active: true, step: pendingStepRef.current }
+      const ns: TourState = {
+        active: true,
+        step: pendingStepRef.current,
+        segmentStart: state.segmentStart,
+        segmentEnd: state.segmentEnd,
+      }
       setState(ns)
-      saveState(ns)
+      saveTourState(ns)
       pendingStepRef.current = null
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -333,48 +371,68 @@ export function OnboardingTour() {
     pendingStepRef.current = null
     const done: TourState = { active: false, step: 0 }
     setState(done)
-    saveState(done)
+    saveTourState(done)
+
+    const resume = consumeTourResumeContext()
+    if (resume?.returnPath) {
+      const current =
+        pathname + (typeof window !== "undefined" ? window.location.search : "")
+      if (resume.returnPath !== current) {
+        router.push(resume.returnPath, { scroll: false })
+      }
+    }
+  }
+
+  function advanceState(nextStep: number) {
+    const ns: TourState = {
+      active: true,
+      step: nextStep,
+      segmentStart: state.segmentStart,
+      segmentEnd: state.segmentEnd,
+    }
+    setState(ns)
+    saveTourState(ns)
   }
 
   function next() {
+    const { isLast } = tourDisplayStep(state)
+    if (isLast) {
+      skip()
+      return
+    }
     const nextStep = state.step + 1
-    if (nextStep >= TOUR_STEPS.length) { skip(); return }
-    const ns: TourState = { active: true, step: nextStep }
-    setState(ns)
-    saveState(ns)
+    if (nextStep >= TOUR_STEPS.length) {
+      skip()
+      return
+    }
+    advanceState(nextStep)
   }
 
   function prev() {
-    if (state.step === 0) return
+    const { isFirst } = tourDisplayStep(state)
+    if (isFirst) return
     pendingStepRef.current = null
     const prevIdx = state.step - 1
     const prevStep = TOUR_STEPS[prevIdx]
-    // If the previous step lives on a different page, navigate there first
-    // and let the pending-step effect commit the state change on arrival.
     if (prevStep && prevStep.page !== null && prevStep.page !== pathname) {
       pendingStepRef.current = prevIdx
       router.push(prevStep.page, { scroll: false })
       return
     }
-    const ns: TourState = { active: true, step: prevIdx }
-    setState(ns)
-    saveState(ns)
+    advanceState(prevIdx)
   }
 
-  // Navigate to a destination page and advance to the next step once the
-  // page loads. State stays on the current step during the transition so
-  // no wrong-page flash is shown.
-  // If we're already on the correct page for the next step, advance immediately
-  // — router.push to the same URL won't change pathname so the effect won't fire.
   function navigateAndAdvance(href: string) {
+    const { isLast } = tourDisplayStep(state)
     const nextIdx = state.step + 1
-    if (nextIdx >= TOUR_STEPS.length) { skip(); return }
+    if (isLast || nextIdx > (state.segmentEnd ?? TOUR_STEPS.length - 1) || nextIdx >= TOUR_STEPS.length) {
+      skip()
+      return
+    }
     const nextStepDef = TOUR_STEPS[nextIdx]
     const alreadyOnPage = nextStepDef.page === null || nextStepDef.page === pathname
     if (alreadyOnPage) {
-      const ns: TourState = { active: true, step: nextIdx }
-      setState(ns)
-      saveState(ns)
+      advanceState(nextIdx)
       return
     }
     pendingStepRef.current = nextIdx
@@ -389,15 +447,18 @@ export function OnboardingTour() {
 
   if (!mounted || !state.active || !currentStep) return null
 
+  const display = tourDisplayStep(state)
+
   return createPortal(
     <TourOverlay
       step={currentStep}
-      stepIndex={state.step}
-      totalSteps={TOUR_STEPS.length}
-      isOnCorrectPage={isOnCorrectPage}
+      displayStep={display.current}
+      displayTotal={display.total}
+      isFirstStep={display.isFirst}
+      isLastStep={display.isLast}
+      isTransitionStep={isTransitionStep}
       spotRect={spotRect}
       tooltipPos={tooltipPos}
-      cardVisible={cardVisible}
       onNext={next}
       onPrev={prev}
       onSkip={skip}
@@ -408,50 +469,17 @@ export function OnboardingTour() {
   )
 }
 
-// ─── Restart button ───────────────────────────────────────────────────────────
-
-export function TourRestartButton({
-  className = "",
-  iconOnly = false,
-}: {
-  className?: string
-  /** Compact control for mobile header (iPhone) */
-  iconOnly?: boolean
-}) {
-  function handleRestart() {
-    const ns: TourState = { active: true, step: 0 }
-    saveState(ns)
-    window.dispatchEvent(new CustomEvent("trollmax:start-tour", { detail: ns }))
-  }
-
-  return (
-    <button
-      type="button"
-      onClick={handleRestart}
-      title="Start or restart the app tour"
-      aria-label="Tour guide"
-      className={
-        iconOnly
-          ? `inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border/60 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground ${className}`
-          : `flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground ${className}`
-      }
-    >
-      <HelpCircle className="h-4 w-4 shrink-0" />
-      {!iconOnly && <span>Tour guide</span>}
-    </button>
-  )
-}
-
 // ─── Overlay ──────────────────────────────────────────────────────────────────
 
 interface OverlayProps {
   step: TourStep
-  stepIndex: number
-  totalSteps: number
-  isOnCorrectPage: boolean
+  displayStep: number
+  displayTotal: number
+  isFirstStep: boolean
+  isLastStep: boolean
+  isTransitionStep: boolean
   spotRect: SpotlightRect | null
   tooltipPos: TooltipPosition
-  cardVisible: boolean
   onNext: () => void
   onPrev: () => void
   onSkip: () => void
@@ -470,12 +498,13 @@ const PAGE_NAMES: Record<string, string> = {
 
 function TourOverlay({
   step,
-  stepIndex,
-  totalSteps,
-  isOnCorrectPage,
+  displayStep,
+  displayTotal,
+  isFirstStep,
+  isLastStep,
+  isTransitionStep,
   spotRect,
   tooltipPos,
-  cardVisible,
   onNext,
   onPrev,
   onSkip,
@@ -486,94 +515,49 @@ function TourOverlay({
   const vh = typeof window !== "undefined" ? window.innerHeight : 800
   const isDesktop = vw >= DESKTOP_BREAKPOINT
   const r = spotRect
-  const hasSpot = r !== null && isOnCorrectPage && step.targetSelector !== null
-  // Must match the width formula in computeTooltipPosition
+  const hasSpot = !isTransitionStep && r !== null && step.targetSelector !== null
   const margin = 16
   const tooltipW = isDesktop ? Math.min(TOOLTIP_W, vw - margin * 2) : vw - margin * 2
-  const isLast = stepIndex === totalSteps - 1
+  const destName = step.page ? PAGE_NAMES[step.page] ?? "the next section" : ""
 
-  const fadeStyle = {
-    opacity: cardVisible ? 1 : 0,
-    // top/left transitions let the card slide smoothly for nearby steps.
-    // They also fire while opacity is 0 (for scroll transitions), so the card
-    // arrives at the new position before it fades in — never a visible jump.
-    transition: "opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1), top 0.28s ease, left 0.28s ease",
-    pointerEvents: (cardVisible ? "auto" : "none") as React.CSSProperties["pointerEvents"],
+  const cardStyle: React.CSSProperties = {
+    top: tooltipPos.top,
+    left: tooltipPos.left,
+    width: isTransitionStep ? Math.min(400, tooltipW) : tooltipW,
+    transition: SLIDE_TRANSITION,
   }
 
-  const spotTransition = "x 0.28s ease, y 0.28s ease, width 0.28s ease, height 0.28s ease"
-
-  // ── Wrong-page transition card ──────────────────────────────────────────────
-  if (!isOnCorrectPage && step.page !== null) {
-    const destName = PAGE_NAMES[step.page] ?? "the next section"
-    return (
-      <div
-        className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm"
-        style={fadeStyle}
-      >
-        <div
-          className="relative w-full rounded-2xl border border-border/60 bg-card shadow-2xl p-6 space-y-4 mx-4"
-          style={{ maxWidth: 400 }}
-        >
-          <button
-            onClick={onSkip}
-            className="absolute right-3 top-3 rounded-full p-1.5 text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
-          >
-            <X className="h-4 w-4" />
-          </button>
-          <div className="space-y-1 pr-6">
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-primary">
-              Step {stepIndex + 1} of {totalSteps}
-            </p>
-            <h2 className="text-lg font-bold leading-snug">
-              Next up: {destName}
-            </h2>
-            <p className="text-sm text-muted-foreground leading-relaxed">
-              The next part of the tour is on {destName}. Head there to continue.
-            </p>
-          </div>
-          <div className="flex gap-2">
-            {step.page && (
-              <button
-                onClick={() => onJustNavigate(step.page!)}
-                className="flex-1 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
-              >
-                Take me there
-              </button>
-            )}
-            <button
-              onClick={onSkip}
-              className="rounded-xl border border-border/60 px-4 py-2.5 text-sm text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors whitespace-nowrap"
-            >
-              Skip tour
-            </button>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  // ── Normal spotlight + card ─────────────────────────────────────────────────
   return (
     <>
-      {/* Dark overlay */}
-      <div className="fixed inset-0 z-[9998]" aria-hidden style={{ ...fadeStyle, pointerEvents: "none" }}>
+      <div className="fixed inset-0 z-[9998]" aria-hidden style={{ pointerEvents: "none" }}>
         {hasSpot ? (
           <svg width={vw} height={vh} className="absolute inset-0" style={{ pointerEvents: "none" }}>
             <defs>
               <mask id="tour-spotlight-mask">
                 <rect width={vw} height={vh} fill="white" />
                 <rect
-                  x={r!.left} y={r!.top} width={r!.width} height={r!.height} rx={8} fill="black"
-                  style={{ transition: spotTransition }}
+                  x={r!.left}
+                  y={r!.top}
+                  width={r!.width}
+                  height={r!.height}
+                  rx={8}
+                  fill="black"
+                  style={{ transition: SPOT_TRANSITION }}
                 />
               </mask>
             </defs>
             <rect width={vw} height={vh} fill="rgba(0,0,0,0.65)" mask="url(#tour-spotlight-mask)" />
             <rect
-              x={r!.left} y={r!.top} width={r!.width} height={r!.height}
-              rx={8} fill="none" stroke="hsl(var(--primary))" strokeWidth={2} opacity={0.8}
-              style={{ transition: spotTransition }}
+              x={r!.left}
+              y={r!.top}
+              width={r!.width}
+              height={r!.height}
+              rx={8}
+              fill="none"
+              stroke="hsl(var(--primary))"
+              strokeWidth={2}
+              opacity={0.8}
+              style={{ transition: SPOT_TRANSITION }}
             />
           </svg>
         ) : (
@@ -581,18 +565,19 @@ function TourOverlay({
         )}
       </div>
 
-      {/* Tooltip card */}
       <div
         className="fixed z-[9999] rounded-2xl border border-border/60 bg-card shadow-2xl"
-        style={{ top: tooltipPos.top, left: tooltipPos.left, width: tooltipW, ...fadeStyle }}
+        style={cardStyle}
       >
-        <div className="p-5 space-y-4">
+        <div className={isTransitionStep ? "space-y-4 p-6" : "space-y-4 p-5"}>
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 space-y-0.5">
               <p className="text-[10px] font-semibold uppercase tracking-widest text-primary">
-                Step {stepIndex + 1} of {totalSteps}
+                Step {displayStep} of {displayTotal}
               </p>
-              <h2 className="text-base font-bold leading-snug">{step.title}</h2>
+              <h2 className="text-base font-bold leading-snug">
+                {isTransitionStep ? `Next up: ${destName}` : step.title}
+              </h2>
             </div>
             <button
               onClick={onSkip}
@@ -603,44 +588,69 @@ function TourOverlay({
             </button>
           </div>
 
-          <p className="text-sm text-muted-foreground leading-relaxed">{step.content}</p>
+          <p className="text-sm text-muted-foreground leading-relaxed">
+            {isTransitionStep
+              ? `The next part of the tour is on ${destName}. Head there to continue.`
+              : step.content}
+          </p>
 
-          {step.navigateTo && (
-            <button
-              onClick={() => onNavigate(step.navigateTo!)}
-              className="w-full rounded-xl bg-primary/10 border border-primary/30 px-4 py-2.5 text-sm font-medium text-primary hover:bg-primary/20 transition-colors text-left"
-            >
-              {step.navigateLabel ?? `Continue to ${step.navigateTo}`}
-            </button>
+          {isTransitionStep ? (
+            <div className="flex gap-2">
+              {step.page && (
+                <button
+                  onClick={() => onJustNavigate(step.page!)}
+                  className="flex-1 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
+                >
+                  Take me there
+                </button>
+              )}
+              <button
+                onClick={onSkip}
+                className="rounded-xl border border-border/60 px-4 py-2.5 text-sm text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors whitespace-nowrap"
+              >
+                Skip tour
+              </button>
+            </div>
+          ) : (
+            <>
+              {step.navigateTo && (
+                <button
+                  onClick={() => onNavigate(step.navigateTo!)}
+                  className="w-full rounded-xl bg-primary/10 border border-primary/30 px-4 py-2.5 text-sm font-medium text-primary hover:bg-primary/20 transition-colors text-left"
+                >
+                  {step.navigateLabel ?? `Continue to ${step.navigateTo}`}
+                </button>
+              )}
+
+              <div className="h-1 w-full rounded-full bg-border/40 overflow-hidden">
+                <div
+                  className="h-full bg-primary rounded-full transition-[width] duration-300 ease-out"
+                  style={{ width: `${(displayStep / displayTotal) * 100}%` }}
+                />
+              </div>
+
+              <div className="flex items-center justify-between gap-2">
+                <button
+                  onClick={onPrev}
+                  disabled={isFirstStep}
+                  className="flex items-center gap-1 rounded-lg border border-border/60 px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors disabled:opacity-30 disabled:pointer-events-none"
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                  Back
+                </button>
+                <span className="text-[11px] tabular-nums text-muted-foreground select-none">
+                  {displayStep} / {displayTotal}
+                </span>
+                <button
+                  onClick={step.navigateTo ? () => onNavigate(step.navigateTo!) : onNext}
+                  className="flex items-center gap-1 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
+                >
+                  {isLastStep ? "Done" : "Next"}
+                  {!isLastStep && <ChevronRight className="h-3.5 w-3.5" />}
+                </button>
+              </div>
+            </>
           )}
-
-          <div className="h-1 w-full rounded-full bg-border/40 overflow-hidden">
-            <div
-              className="h-full bg-primary rounded-full transition-all duration-300"
-              style={{ width: `${((stepIndex + 1) / totalSteps) * 100}%` }}
-            />
-          </div>
-
-          <div className="flex items-center justify-between gap-2">
-            <button
-              onClick={onPrev}
-              disabled={stepIndex === 0}
-              className="flex items-center gap-1 rounded-lg border border-border/60 px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors disabled:opacity-30 disabled:pointer-events-none"
-            >
-              <ChevronLeft className="h-3.5 w-3.5" />
-              Back
-            </button>
-            <span className="text-[11px] tabular-nums text-muted-foreground select-none">
-              {stepIndex + 1} / {totalSteps}
-            </span>
-            <button
-              onClick={step.navigateTo ? () => onNavigate(step.navigateTo!) : onNext}
-              className="flex items-center gap-1 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
-            >
-              {isLast ? "Done" : "Next"}
-              {!isLast && <ChevronRight className="h-3.5 w-3.5" />}
-            </button>
-          </div>
         </div>
       </div>
     </>

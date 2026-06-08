@@ -77,6 +77,10 @@ export interface VideoManifest extends BaseManifest {
   /** Stored headshot URL (often Vercel Blob). Server sends bytes to D-ID `POST /images`; not passed as `source_url` raw.
    * Cleared (set to "") after D-ID generation so the blob can be deleted. */
   headshotImageUrl: string
+  /** Character preset id when the headshot came from the catalog (draft resume). */
+  headshotPresetId?: string | null
+  /** Wizard step when status is draft (in-progress editor). */
+  wizardStep?: 1 | 2 | 3
   /** Layout for combining D-ID talking head + background video */
   talkingMode: "full" | "half"
   /** Whether to burn captions into the rendered video (default true). */
