@@ -4,7 +4,10 @@ import { useState, useMemo, useEffect, useRef, useCallback } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useUser, useClerk } from "@clerk/nextjs"
 import Link from "next/link"
-import { emitBananaCreditsUpdated } from "@/lib/client/banana-credits-bridge"
+import {
+  emitBananaCreditsUpdated,
+  refreshBananaCreditsFromServer,
+} from "@/lib/client/banana-credits-bridge"
 import NextImage from "next/image"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -1092,8 +1095,9 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
     if (typeof postGenBananaBalance === "number") {
       emitBananaCreditsUpdated(postGenBananaBalance)
     }
+    await refreshBananaCreditsFromServer()
     clearPendingGeneration()
-    router.refresh()
+    await router.refresh()
     setStage("done")
     router.push(`/app/video/${createdId}`)
   }, [router, script.length, openCreditGate])

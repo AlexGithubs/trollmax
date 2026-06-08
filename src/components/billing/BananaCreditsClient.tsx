@@ -1,10 +1,19 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
+import { usePathname } from "next/navigation"
 import { Coins } from "lucide-react"
-import { currencyIconAlt, currencyIconSrc } from "@/lib/billing/currency-display"
-import { BANANA_CREDITS_UPDATED_EVENT } from "@/lib/client/banana-credits-bridge"
+import {
+  currencyIconAlt,
+  currencyIconSrc,
+  formatCreditBadgeAmount,
+} from "@/lib/billing/currency-display"
+import {
+  BANANA_CREDITS_CLIENT_OVERRIDE_MS,
+  BANANA_CREDITS_UPDATED_EVENT,
+  refreshBananaCreditsFromServer,
+} from "@/lib/client/banana-credits-bridge"
 import { SignInBalanceLink } from "@/components/layout/SignInLink"
 
 type Props = {
@@ -19,19 +28,33 @@ type Props = {
  */
 export function BananaCreditsClient({ initialBalance, signedIn, variant }: Props) {
   const [balance, setBalance] = useState(initialBalance)
-
-  useEffect(() => {
-    setBalance(initialBalance)
-  }, [initialBalance])
+  const lastClientUpdateAt = useRef(0)
+  const pathname = usePathname()
+  const displayBalance = formatCreditBadgeAmount(balance)
 
   useEffect(() => {
     const onUpdate = (e: Event) => {
       const d = (e as CustomEvent<{ balance?: number }>).detail
-      if (typeof d?.balance === "number") setBalance(d.balance)
+      if (typeof d?.balance === "number") {
+        lastClientUpdateAt.current = Date.now()
+        setBalance(d.balance)
+      }
     }
     window.addEventListener(BANANA_CREDITS_UPDATED_EVENT, onUpdate)
     return () => window.removeEventListener(BANANA_CREDITS_UPDATED_EVENT, onUpdate)
   }, [])
+
+  // Avoid stale layout props from router.refresh() overwriting a fresh post-generation balance.
+  useEffect(() => {
+    if (Date.now() - lastClientUpdateAt.current < BANANA_CREDITS_CLIENT_OVERRIDE_MS) return
+    setBalance(initialBalance)
+  }, [initialBalance])
+
+  // Reconcile with the server when navigating between app routes.
+  useEffect(() => {
+    if (!signedIn) return
+    void refreshBananaCreditsFromServer()
+  }, [pathname, signedIn])
 
   if (!signedIn) {
     if (variant === "sidebar") {
@@ -54,7 +77,7 @@ export function BananaCreditsClient({ initialBalance, signedIn, variant }: Props
         href="/pricing"
         className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-2 py-1 text-xs font-semibold hover:bg-primary/20 transition-colors"
       >
-        {balance}
+        {displayBalance}
         <img src={currencyIconSrc()} alt={currencyIconAlt()} className="h-6 w-6 object-contain" />
       </Link>
     )
@@ -63,7 +86,7 @@ export function BananaCreditsClient({ initialBalance, signedIn, variant }: Props
   return (
     <>
       <p className="mt-1 flex items-center gap-1.5 text-lg font-bold text-foreground">
-        {balance}
+        {displayBalance}
         <img src={currencyIconSrc()} alt={currencyIconAlt()} className="h-7 w-7 object-contain" />
       </p>
       <p className="mt-1 text-[11px] text-muted-foreground">

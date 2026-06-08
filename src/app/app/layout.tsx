@@ -10,6 +10,8 @@ import { Zap, Mic2, Video, LayoutDashboard } from "lucide-react"
 import { getUserEntitlements } from "@/lib/billing/entitlements"
 import { currencyIconAlt, currencyIconSrc } from "@/lib/billing/currency-display"
 
+export const dynamic = "force-dynamic"
+
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await currentUser()
   const ent = user?.id ? await getUserEntitlements(user.id) : null

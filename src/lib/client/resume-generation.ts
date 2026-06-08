@@ -26,7 +26,7 @@ export async function pollUntilCredits(
   const deadline = Date.now() + maxMs
   while (Date.now() < deadline) {
     try {
-      const res = await fetch("/api/billing/entitlement")
+      const res = await fetch("/api/billing/entitlement", { cache: "no-store" })
       if (res.ok) {
         const data = (await res.json()) as EntitlementResponse
         const balance = data.bananaCreditsBalance

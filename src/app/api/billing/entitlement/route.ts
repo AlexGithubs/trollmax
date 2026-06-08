@@ -8,6 +8,8 @@ import {
 } from "@/lib/billing/video-generation-cost"
 import { CURRENCY_MODE } from "@/lib/billing/currency-display"
 
+export const dynamic = "force-dynamic"
+
 export async function GET() {
   const user = await currentUser()
   if (!user) {
@@ -16,23 +18,30 @@ export async function GET() {
 
   const e = await getUserEntitlements(user.id)
 
-  return NextResponse.json({
-    currencyMode: CURRENCY_MODE,
-    maxSoundboards: e.maxSoundboards,
-    soundboardCount: e.soundboardCount,
-    maxPhrases: e.maxPhrases,
-    maxPhraseChars: e.maxPhraseChars,
-    baseMaxPhrases: e.baseMaxPhrases,
-    baseMaxPhraseChars: e.baseMaxPhraseChars,
-    bananaCreditsBalance: e.bananaCreditsBalance,
-    startingBananaCredits: STARTING_BANANA_CREDITS,
-    costs: {
-      soundboardGenerate: BANANA_CREDIT_COSTS.soundboardGenerate,
-      soundboardExpansion: BANANA_CREDIT_COSTS.soundboardExpansion,
-      videoGenerate: BANANA_CREDIT_COSTS.videoGenerate,
-      videoScriptCharsPerCreditBlock: VIDEO_SCRIPT_CHARS_PER_CREDIT_BLOCK,
-      videoGenerateBaseBananaCredits: VIDEO_GENERATE_BASE_BANANA_CREDITS,
+  return NextResponse.json(
+    {
+      currencyMode: CURRENCY_MODE,
+      maxSoundboards: e.maxSoundboards,
+      soundboardCount: e.soundboardCount,
+      maxPhrases: e.maxPhrases,
+      maxPhraseChars: e.maxPhraseChars,
+      baseMaxPhrases: e.baseMaxPhrases,
+      baseMaxPhraseChars: e.baseMaxPhraseChars,
+      bananaCreditsBalance: e.bananaCreditsBalance,
+      startingBananaCredits: STARTING_BANANA_CREDITS,
+      costs: {
+        soundboardGenerate: BANANA_CREDIT_COSTS.soundboardGenerate,
+        soundboardExpansion: BANANA_CREDIT_COSTS.soundboardExpansion,
+        videoGenerate: BANANA_CREDIT_COSTS.videoGenerate,
+        videoScriptCharsPerCreditBlock: VIDEO_SCRIPT_CHARS_PER_CREDIT_BLOCK,
+        videoGenerateBaseBananaCredits: VIDEO_GENERATE_BASE_BANANA_CREDITS,
+      },
+      atSoundboardLimit: e.soundboardCount >= e.maxSoundboards,
     },
-    atSoundboardLimit: e.soundboardCount >= e.maxSoundboards,
-  })
+    {
+      headers: {
+        "Cache-Control": "no-store",
+      },
+    }
+  )
 }

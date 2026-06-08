@@ -4,7 +4,10 @@ import { useState, useRef, useEffect, useMemo, useCallback, type MouseEvent } fr
 import { useRouter } from "next/navigation"
 import { useUser, useClerk } from "@clerk/nextjs"
 import { Button } from "@/components/ui/button"
-import { emitBananaCreditsUpdated } from "@/lib/client/banana-credits-bridge"
+import {
+  emitBananaCreditsUpdated,
+  refreshBananaCreditsFromServer,
+} from "@/lib/client/banana-credits-bridge"
 import { Card, CardContent } from "@/components/ui/card"
 import {
   Upload,
@@ -442,8 +445,9 @@ export default function NewSoundboardPage() {
       if (typeof postGenBananaBalance === "number") {
         emitBananaCreditsUpdated(postGenBananaBalance)
       }
+      await refreshBananaCreditsFromServer()
       clearPendingGeneration()
-      router.refresh()
+      await router.refresh()
       setStage("done")
       router.push(`/app/soundboard/${createdId}`)
     },
