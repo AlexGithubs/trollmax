@@ -9,7 +9,7 @@ export default function PrivacyPage() {
   return (
     <div className="flex min-h-screen flex-col">
       <SiteHeader />
-      <main className="mx-auto max-w-2xl flex-1 px-4 py-16">
+      <main className="mx-auto max-w-2xl flex-1 px-4 py-10 sm:py-16">
         <h1 className="mb-2 text-3xl font-bold tracking-tight">Privacy Policy</h1>
         <p className="mb-8 text-sm text-muted-foreground">Last updated: March 2026</p>
 

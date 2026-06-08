@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" role="img" aria-label="Subway Surfers">
+  <defs>
+    <linearGradient id="tunnel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ff6b35"/>
+      <stop offset="50%" stop-color="#f7931e"/>
+      <stop offset="100%" stop-color="#ffd23f"/>
+    </linearGradient>
+    <linearGradient id="track" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3d3d3d"/>
+      <stop offset="100%" stop-color="#1a1a1a"/>
+    </linearGradient>
+  </defs>
+  <rect width="80" height="80" fill="url(#tunnel)"/>
+  <rect y="0" width="80" height="12" fill="#2a2a2a" opacity="0.35"/>
+  <rect y="68" width="80" height="12" fill="#2a2a2a" opacity="0.35"/>
+  <rect x="10" y="58" width="60" height="6" rx="1" fill="url(#track)"/>
+  <rect x="14" y="60" width="4" height="2" fill="#888"/>
+  <rect x="26" y="60" width="4" height="2" fill="#888"/>
+  <rect x="38" y="60" width="4" height="2" fill="#888"/>
+  <rect x="50" y="60" width="4" height="2" fill="#888"/>
+  <rect x="62" y="60" width="4" height="2" fill="#888"/>
+  <rect x="34" y="38" width="12" height="18" rx="3" fill="#00c2ff"/>
+  <rect x="36" y="40" width="8" height="6" rx="1" fill="#fff" opacity="0.5"/>
+  <circle cx="38" cy="58" r="3" fill="#222"/>
+  <circle cx="42" cy="58" r="3" fill="#222"/>
+  <rect x="48" y="28" width="8" height="8" fill="#ff4081" transform="rotate(12 52 32)"/>
+  <rect x="20" y="32" width="6" height="6" fill="#7c4dff" transform="rotate(-8 23 35)"/>
+</svg>

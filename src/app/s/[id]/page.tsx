@@ -114,7 +114,7 @@ export default async function SoundboardSharePage({
           {/* Header */}
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 space-y-1">
-              <h1 className="text-3xl font-bold tracking-tight">{manifest.title}</h1>
+              <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">{manifest.title}</h1>
               <p className="text-sm text-muted-foreground">
                 <span className="font-medium text-foreground">{manifest.speakerLabel}</span>
                 &apos;s voice · {manifest.clips.length} clip{manifest.clips.length !== 1 ? "s" : ""}

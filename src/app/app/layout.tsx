@@ -51,12 +51,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       </aside>
 
       <div className="flex min-h-screen flex-1 flex-col lg:ml-56">
-        <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center justify-between gap-2 border-b border-border/50 bg-background/95 px-4 backdrop-blur-md supports-[backdrop-filter]:bg-background/80 lg:hidden">
+        <header className="sticky top-0 z-30 flex min-h-[calc(var(--app-header-h)+var(--app-safe-top))] shrink-0 items-center justify-between gap-2 border-b border-border/50 bg-background/95 px-4 pt-[var(--app-safe-top)] backdrop-blur-md supports-[backdrop-filter]:bg-background/80 lg:hidden">
           <Link href="/" className="flex min-w-0 items-center gap-2 font-bold">
             <Zap className="h-4 w-4 shrink-0 fill-primary text-primary" />
             <span className="truncate">TROLLMAX</span>
           </Link>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
             {user ? (
               <BananaCreditsClient
                 variant="mobile"
@@ -66,12 +66,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             ) : (
               <SignInMobileButton />
             )}
-            <TourRestartButton className="lg:hidden" iconOnly />
+            <TourRestartButton className="hidden min-[400px]:inline-flex lg:hidden" iconOnly />
             <AppUserButton />
           </div>
         </header>
 
-        <main className="flex-1 overscroll-y-contain p-6 pb-24 lg:pb-6">
+        <main className="flex-1 overscroll-y-contain p-4 pb-[calc(var(--app-chrome-bottom)+1.5rem)] sm:p-6 lg:pb-6">
           {children}
         </main>
       </div>

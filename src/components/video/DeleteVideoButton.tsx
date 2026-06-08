@@ -8,9 +8,10 @@ import { Trash2, Loader2 } from "lucide-react"
 interface Props {
   id: string
   redirectTo?: string
+  variant?: "full" | "icon"
 }
 
-export function DeleteVideoButton({ id, redirectTo }: Props) {
+export function DeleteVideoButton({ id, redirectTo, variant = "full" }: Props) {
   const router = useRouter()
   const [confirming, setConfirming] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -34,23 +35,29 @@ export function DeleteVideoButton({ id, redirectTo }: Props) {
 
   return (
     <Button
-      variant="ghost"
-      size="sm"
+      variant={variant === "icon" ? (confirming ? "destructive" : "outline") : "ghost"}
+      size={variant === "icon" ? "icon" : "sm"}
       className={[
-        "w-full text-xs",
-        confirming
+        variant === "icon"
+          ? "h-11 w-11 shrink-0"
+          : "w-full text-xs",
+        variant !== "icon" && confirming
           ? "text-destructive border border-destructive/30 bg-destructive/5"
-          : "text-muted-foreground",
+          : variant !== "icon"
+            ? "text-muted-foreground"
+            : "",
       ].join(" ")}
       onClick={handleDelete}
       disabled={deleting}
+      aria-label={confirming ? "Confirm delete video" : "Delete video"}
+      title={confirming ? "Confirm delete" : "Delete video"}
     >
       {deleting ? (
-        <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+        <Loader2 className={variant === "icon" ? "h-4 w-4 animate-spin" : "mr-1.5 h-3.5 w-3.5 animate-spin"} />
       ) : (
-        <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+        <Trash2 className={variant === "icon" ? "h-4 w-4" : "mr-1.5 h-3.5 w-3.5"} />
       )}
-      {confirming ? "Confirm delete" : "Delete video"}
+      {variant === "full" ? (confirming ? "Confirm delete" : "Delete video") : null}
     </Button>
   )
 }

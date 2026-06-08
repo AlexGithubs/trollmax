@@ -3,13 +3,15 @@ export const BACKGROUND_OPTIONS = [
     id: "minecraft",
     label: "Minecraft",
     color: "#2d5a1b",
-    description: "Forest green gameplay",
+    thumbSrc: "/video-backgrounds/minecraft-thumb.svg",
+    description: "Minecraft parkour gameplay",
   },
   {
     id: "subway-surfers",
     label: "Subway Surfers",
     color: "#e8721a",
-    description: "Orange runner background",
+    thumbSrc: "/video-backgrounds/subway-surfers-thumb.svg",
+    description: "Subway Surfers gameplay",
   },
 ] as const
 

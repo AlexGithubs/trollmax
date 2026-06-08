@@ -611,7 +611,7 @@ export default function NewSoundboardPage() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
+    <div className="mx-auto max-w-2xl space-y-6 pb-[calc(var(--app-chrome-bottom)+var(--app-wizard-footer-h)+0.5rem)] lg:pb-0">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">New Soundboard</h1>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -638,7 +638,7 @@ export default function NewSoundboardPage() {
                 setSelectedPresetId(null)
               }}
               className={[
-                "flex w-full items-center justify-start gap-2.5 rounded-md px-3 py-2.5 text-sm font-medium transition-colors sm:flex-1 sm:justify-center sm:gap-1.5 sm:py-2 sm:text-xs",
+                "flex w-full items-center justify-start gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors sm:flex-1 sm:justify-center sm:gap-1.5 sm:py-2 sm:text-xs",
                 voiceMode === "upload"
                   ? "bg-card text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground",
@@ -661,7 +661,7 @@ export default function NewSoundboardPage() {
                 if (fileInputRef.current) fileInputRef.current.value = ""
               }}
               className={[
-                "flex w-full items-center justify-start gap-2.5 rounded-md px-3 py-2.5 text-sm font-medium transition-colors sm:flex-1 sm:justify-center sm:gap-1.5 sm:py-2 sm:text-xs",
+                "flex w-full items-center justify-start gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors sm:flex-1 sm:justify-center sm:gap-1.5 sm:py-2 sm:text-xs",
                 voiceMode === "preset"
                   ? "bg-card text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground",
@@ -677,7 +677,7 @@ export default function NewSoundboardPage() {
               <p className="text-xs text-muted-foreground">
                 Tap a card to select it and hear a short preview. Tap again to stop.
               </p>
-              <div className="filter-tabs flex gap-2 overflow-x-auto pb-0.5">
+              <div className="filter-tabs-scroll-hint filter-tabs flex gap-2 overflow-x-auto pb-0.5">
                 <button
                   type="button"
                   disabled={busy}
@@ -710,7 +710,7 @@ export default function NewSoundboardPage() {
                 ))}
               </div>
               <div className="preset-scroll max-h-[min(420px,55vh)] overflow-y-auto pr-2">
-                <div className="grid grid-cols-3 gap-3">
+                <div className="preset-grid">
                   {filteredPresets.map((p) => {
                     const selected = selectedPresetId === p.id
                     const comingSoon = p.status !== "active"
@@ -1067,13 +1067,13 @@ export default function NewSoundboardPage() {
 
           <Card className="border-border/60 bg-card/50">
             <CardContent className="pt-5 space-y-3">
-              <div className="flex items-center gap-2">
-                <p className="text-sm font-medium">Current selections</p>
-                <span title="Quick check of the values that will be sent when you click Generate.">
+              <details className="group">
+                <summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-medium marker:content-none [&::-webkit-details-marker]:hidden">
+                  <p>Current selections</p>
                   <Info className="h-4 w-4 text-muted-foreground" />
-                </span>
-              </div>
-              <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
+                  <span className="ml-auto text-xs text-muted-foreground group-open:hidden">Tap to review</span>
+                </summary>
+              <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
                 <p>
                   Title: <span className="text-foreground">{title.trim() || "Not set"}</span>
                 </p>
@@ -1109,6 +1109,7 @@ export default function NewSoundboardPage() {
                   <span className="text-foreground">{voiceRefText.trim() ? "Provided" : "Not provided"}</span>
                 </p>
               </div>
+              </details>
             </CardContent>
           </Card>
 
@@ -1148,7 +1149,7 @@ export default function NewSoundboardPage() {
             data-tour="sb-generate-btn"
             onClick={handleGenerate}
             disabled={isSignedIn === false ? false : busy || !voiceReady || !consent || atSoundboardLimit}
-            className="group h-14 w-full justify-between rounded-2xl px-5 text-base font-semibold shadow-lg shadow-primary/20 transition-all hover:shadow-xl hover:shadow-primary/30 disabled:shadow-none"
+            className="group hidden h-14 w-full justify-between rounded-2xl px-5 text-base font-semibold shadow-lg shadow-primary/20 transition-all hover:shadow-xl hover:shadow-primary/30 disabled:shadow-none lg:flex"
             size="lg"
           >
             <span className="tracking-tight">
@@ -1159,6 +1160,24 @@ export default function NewSoundboardPage() {
               {formatCreditBadgeAmount(generationCost)}
             </span>
           </Button>
+
+      <div className="fixed inset-x-0 bottom-[var(--app-chrome-bottom)] z-30 min-h-[var(--app-wizard-footer-h)] border-t border-border/60 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 lg:hidden">
+        <div className="mx-auto max-w-2xl px-4 py-3">
+          <Button
+            data-tour="sb-generate-btn"
+            onClick={handleGenerate}
+            disabled={isSignedIn === false ? false : busy || !voiceReady || !consent || atSoundboardLimit}
+            className="group h-12 w-full min-w-0 flex-row items-center justify-between gap-2 rounded-xl px-3 text-sm font-semibold shadow-lg shadow-primary/20 sm:h-14 sm:rounded-2xl sm:px-5 sm:text-base"
+            size="lg"
+          >
+            <span className="whitespace-nowrap tracking-tight">Generate Soundboard</span>
+            <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/20 bg-black/15 px-2.5 py-1 text-sm font-bold backdrop-blur-sm">
+              <img src={currencyIconSrc()} alt={currencyIconAlt()} className="h-5 w-5 object-contain sm:h-6 sm:w-6" />
+              {formatCreditBadgeAmount(generationCost)}
+            </span>
+          </Button>
+        </div>
+      </div>
     </div>
   )
 }

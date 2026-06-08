@@ -12,7 +12,7 @@ export default function TakedownPage() {
   return (
     <div className="flex min-h-screen flex-col">
       <SiteHeader />
-      <main className="mx-auto max-w-xl flex-1 px-4 py-16">
+      <main className="mx-auto max-w-xl flex-1 px-4 py-10 sm:py-16">
         <div className="mb-8 flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-destructive/10">
             <AlertTriangle className="h-5 w-5 text-destructive" />

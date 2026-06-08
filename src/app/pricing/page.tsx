@@ -37,9 +37,9 @@ export default function PricingPage() {
     <div className="flex min-h-screen flex-col">
       <SiteHeader />
       <main className="flex-1">
-        <section className="mx-auto max-w-[1400px] px-4 py-16 sm:px-6 md:py-24 lg:px-10 lg:py-28">
-          <header className="mx-auto mb-14 max-w-2xl text-center md:mb-20">
-            <h1 className="text-[2.5rem] font-semibold leading-[1.1] tracking-tight text-foreground sm:text-5xl md:text-[3.25rem]">
+        <section className="mx-auto max-w-[1400px] px-4 py-10 sm:px-6 sm:py-16 md:py-24 lg:px-10 lg:py-28">
+          <header className="mx-auto mb-10 max-w-2xl text-center md:mb-20">
+            <h1 className="text-3xl font-semibold leading-[1.1] tracking-tight text-foreground sm:text-5xl md:text-[3.25rem]">
               Buy banana credits — pay once, create forever.
             </h1>
             <p className="mx-auto mt-5 max-w-lg text-base leading-relaxed text-muted-foreground md:text-lg">
@@ -62,7 +62,7 @@ export default function PricingPage() {
                 <div
                   key={p.id}
                   className={cn(
-                    "relative flex min-h-[520px] flex-col rounded-3xl p-7 sm:p-8",
+                    "relative flex min-h-0 flex-col rounded-3xl p-6 sm:min-h-[520px] sm:p-8",
                     featured
                       ? "border-2 border-primary/55 bg-gradient-to-b from-primary/[0.16] via-primary/[0.06] to-[oklch(0.14_0.02_300)] shadow-[0_0_0_1px_oklch(0.55_0.2_300/0.15),0_0_56px_-12px_oklch(0.55_0.22_300/0.35)]"
                       : "border border-white/[0.08] bg-[oklch(0.145_0.01_280)]"
@@ -125,7 +125,7 @@ export default function PricingPage() {
             {/* Enterprise — fourth column, warm gradient accent */}
             <div
               id="enterprise"
-              className="relative flex min-h-[520px] flex-col overflow-hidden rounded-3xl border border-white/[0.08] bg-[oklch(0.145_0.01_280)] scroll-mt-24"
+              className="relative flex min-h-0 flex-col overflow-hidden rounded-3xl border border-white/[0.08] bg-[oklch(0.145_0.01_280)] scroll-mt-24 sm:min-h-[520px]"
             >
               <div
                 className="pointer-events-none absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-orange-950/[0.55]"

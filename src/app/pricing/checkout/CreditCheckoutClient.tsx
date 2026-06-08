@@ -62,14 +62,14 @@ export function CreditCheckoutClient({
               ← Pricing
             </Link>
 
-            <p className="mt-12 text-[10px] font-medium uppercase tracking-[0.22em] text-muted-foreground">
+            <p className="mt-6 text-[10px] font-medium uppercase tracking-[0.22em] text-muted-foreground sm:mt-12">
               Checkout
             </p>
             <h1 className="mt-2 text-2xl font-semibold tracking-tight md:text-[1.75rem] md:leading-snug">
               Banana credits
             </h1>
 
-            <div className="mt-12 flex flex-wrap items-end gap-x-3 gap-y-0.5">
+            <div className="mt-6 flex flex-wrap items-end gap-x-3 gap-y-0.5 sm:mt-12">
               <span className="text-[2.75rem] font-semibold leading-none tracking-tight tabular-nums md:text-5xl">
                 {money(selected.priceUsd)}
               </span>

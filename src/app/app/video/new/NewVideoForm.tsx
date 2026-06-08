@@ -359,6 +359,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
   const [captionsEnabled, setCaptionsEnabled] = useState(true)
   const [consent, setConsent] = useState(false)
   const [wizardStep, setWizardStep] = useState<WizardStep>(1)
+  const [step1Phase, setStep1Phase] = useState<"headshot" | "voice">("headshot")
   const [selectedHeadshotPresetId, setSelectedHeadshotPresetId] = useState<string | null>(null)
   const [headshotDragActive, setHeadshotDragActive] = useState(false)
   const [voiceDragActive, setVoiceDragActive] = useState(false)
@@ -1265,23 +1266,41 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
 
   const noVoicesAtAll = false // upload tab is always available
 
+  const step1HeadshotReady = Boolean(headshotImageUrl) && !headshotUploading
   const step1Ready =
-    Boolean(headshotImageUrl) && !headshotUploading && voiceReady && !voiceUploadBusy
+    step1HeadshotReady && voiceReady && !voiceUploadBusy
   const step2Ready = Boolean(videoTitle.trim()) && Boolean(script.trim())
   const canGenerate =
     isSignedIn === false ||
     (!noVoicesAtAll && step1Ready && step2Ready && consent)
 
-  function goToWizardStep(step: WizardStep) {
+  function goToWizardStep(step: WizardStep, options?: { step1Phase?: "headshot" | "voice" }) {
     setError("")
     setWizardStep(step)
+    if (step === 1) {
+      setStep1Phase(options?.step1Phase ?? "headshot")
+    }
     window.scrollTo({ top: 0, behavior: "smooth" })
   }
 
   function handleWizardNext() {
-    if (wizardStep === 1 && !step1Ready) {
-      if (!headshotImageUrl) setError("Add a headshot — pick a preset or upload a photo.")
-      else if (!voiceReady) setError("Select a voice to continue.")
+    if (wizardStep === 1) {
+      if (step1Phase === "headshot") {
+        if (!step1HeadshotReady) {
+          setError("Add a headshot — pick a preset or upload a photo.")
+          return
+        }
+        setError("")
+        setStep1Phase("voice")
+        window.scrollTo({ top: 0, behavior: "smooth" })
+        return
+      }
+      if (!voiceReady || voiceUploadBusy) {
+        setError("Select a voice to continue.")
+        return
+      }
+      setError("")
+      goToWizardStep(2)
       return
     }
     if (wizardStep === 2 && !step2Ready) {
@@ -1295,16 +1314,26 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
 
   function handleWizardBack() {
     setError("")
+    if (wizardStep === 1 && step1Phase === "voice") {
+      setStep1Phase("headshot")
+      window.scrollTo({ top: 0, behavior: "smooth" })
+      return
+    }
+    if (wizardStep === 2) {
+      goToWizardStep(1, { step1Phase: "voice" })
+      return
+    }
     goToWizardStep((wizardStep - 1) as WizardStep)
   }
 
   return (
-    <div className="mx-auto max-w-2xl space-y-5 pb-32 lg:pb-24">
+    <div className="mx-auto max-w-2xl space-y-5 pb-[calc(var(--app-chrome-bottom)+var(--app-wizard-footer-h)+0.5rem)] lg:pb-24">
       <div className="space-y-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">New Video</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {wizardStep === 1 && "Pick who appears and how they sound."}
+            {wizardStep === 1 && step1Phase === "headshot" && "Pick who appears in your video."}
+            {wizardStep === 1 && step1Phase === "voice" && "Pick how they sound."}
             {wizardStep === 2 && "Name your video and write what they say."}
             {wizardStep === 3 && "Pick how the video is framed, then background, captions, and generate."}
           </p>
@@ -1312,8 +1341,15 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
         <VideoWizardStepper
           current={wizardStep}
           onStepClick={(step) => {
-            if (step === 1) goToWizardStep(1)
-            else if (step === 2 && step1Ready) goToWizardStep(2)
+            if (step === 1) {
+              setStep1Phase("headshot")
+              goToWizardStep(1)
+            } else if (step === 2 && step1Ready) {
+              goToWizardStep(2)
+            } else if (step === 2 && step1HeadshotReady) {
+              setStep1Phase("voice")
+              goToWizardStep(1)
+            }
           }}
         />
       </div>
@@ -1340,9 +1376,9 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
         </div>
       )}
 
-      {wizardStep === 1 && (
+      {wizardStep === 1 && step1Phase === "headshot" && (
         <>
-      {/* Step 1: Headshot */}
+      {/* Step 1a: Headshot */}
       <Card data-tour="video-headshot" className="border-border/60 bg-card/50">
         <CardContent className="pt-5 space-y-4">
           <p className="text-sm font-medium">Headshot</p>
@@ -1352,8 +1388,8 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
 
           <div className="space-y-2">
             <label className="text-xs font-medium text-muted-foreground">Character presets</label>
-            <div className="max-h-[min(240px,40vh)] overflow-y-auto pr-1 sm:max-h-[min(300px,45vh)]">
-              <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 sm:gap-3">
+            <div className="max-h-[min(320px,50vh)] overflow-y-auto pr-1 sm:max-h-[min(300px,45vh)]">
+              <div className="preset-grid">
                 {HEADSHOT_PRESETS.map((p) => {
                   const selected = selectedHeadshotPresetId === p.id && Boolean(headshotImageUrl)
                   const thumbSrc = headshotPresetImageSrc(p)
@@ -1375,7 +1411,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
                         alt=""
                         className="h-12 w-12 rounded-full border border-border/40 object-cover object-[center_22%] sm:h-14 sm:w-14"
                       />
-                      <span className="line-clamp-2 text-[10px] font-medium leading-tight sm:text-xs">
+                      <span className="line-clamp-2 text-xs font-medium leading-tight">
                         {p.displayName}
                       </span>
                     </button>
@@ -1507,8 +1543,12 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
           </MoreOptions>
         </CardContent>
       </Card>
+        </>
+      )}
 
-      {/* Step 1: Voice */}
+      {wizardStep === 1 && step1Phase === "voice" && (
+        <>
+      {/* Step 1b: Voice */}
       <Card data-tour="video-voice-tabs" className="border-border/60 bg-card/50">
         <CardContent className="pt-5 space-y-3">
           <p className="text-sm font-medium">Voice</p>
@@ -1520,7 +1560,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
               disabled={!canUsePresets}
               onClick={() => setVoiceKind("preset")}
               className={[
-                "flex w-full items-center justify-start gap-2.5 rounded-md px-3 py-2.5 text-sm font-medium transition-colors sm:flex-1 sm:justify-center sm:gap-1.5 sm:py-2 sm:text-xs",
+                "flex w-full items-center justify-start gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors sm:flex-1 sm:justify-center sm:gap-1.5 sm:py-2 sm:text-xs",
                 voiceKind === "preset"
                   ? "bg-card text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground",
@@ -1535,7 +1575,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
               disabled={!canUseBoards}
               onClick={() => setVoiceKind("board")}
               className={[
-                "flex w-full items-center justify-start gap-2.5 rounded-md px-3 py-2.5 text-sm font-medium transition-colors sm:flex-1 sm:justify-center sm:gap-1.5 sm:py-2 sm:text-xs",
+                "flex w-full items-center justify-start gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors sm:flex-1 sm:justify-center sm:gap-1.5 sm:py-2 sm:text-xs",
                 voiceKind === "board"
                   ? "bg-card text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground",
@@ -1549,7 +1589,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
               type="button"
               onClick={() => setVoiceKind("upload")}
               className={[
-                "flex w-full items-center justify-start gap-2.5 rounded-md px-3 py-2.5 text-sm font-medium transition-colors sm:flex-1 sm:justify-center sm:gap-1.5 sm:py-2 sm:text-xs",
+                "flex w-full items-center justify-start gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors sm:flex-1 sm:justify-center sm:gap-1.5 sm:py-2 sm:text-xs",
                 voiceKind === "upload"
                   ? "bg-card text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground",
@@ -1566,7 +1606,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
               <p className="text-xs text-muted-foreground">
                 Tap a card to select it and hear a short preview. Tap again to stop.
               </p>
-              <div className="filter-tabs flex gap-2 overflow-x-auto pb-0.5">
+              <div className="filter-tabs-scroll-hint filter-tabs flex gap-2 overflow-x-auto pb-0.5">
                 <button
                   type="button"
                   onClick={() => setCategoryFilter("all")}
@@ -1597,7 +1637,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
                 ))}
               </div>
               <div data-tour="video-preset-grid" className="preset-scroll max-h-[min(420px,55vh)] overflow-y-auto pr-2">
-                <div className="grid grid-cols-3 gap-3">
+                <div className="preset-grid">
                   {filteredPresets.map((p) => {
                     const selected = selectedPresetId === p.id
                     const comingSoon = p.status !== "active"
@@ -1856,7 +1896,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
 
           <div className="space-y-2">
             <label className="text-xs text-muted-foreground">Start from a template</label>
-            <div className="filter-tabs flex gap-2 overflow-x-auto pb-0.5">
+            <div className="filter-tabs-scroll-hint filter-tabs flex gap-2 overflow-x-auto pb-0.5">
               {SCRIPT_TEMPLATES.map((t) => (
                 <button
                   key={t.id}
@@ -1878,8 +1918,8 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
                 onChange={(e) => setScript(e.target.value)}
                 placeholder="Write what you want the AI to say in your video…"
                 maxLength={2000}
-                rows={8}
-                className="w-full rounded-md border border-border/60 bg-secondary/20 px-3 py-2 text-sm outline-none focus:border-primary/60 resize-none"
+                rows={5}
+                className="min-h-[120px] w-full rounded-md border border-border/60 bg-secondary/20 px-3 py-2 text-base outline-none focus:border-primary/60 resize-y sm:min-h-[200px] sm:text-sm"
               />
               <span className="absolute bottom-2 right-3 text-xs text-muted-foreground">
                 {script.length}/2000
@@ -1936,7 +1976,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
             )}
           </div>
           {talkingMode === "half" ? (
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {BACKGROUND_OPTIONS.map((bg) => (
                 <button
                   key={bg.id}
@@ -1949,9 +1989,10 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
                       : "border-border/40 hover:border-border/80",
                   ].join(" ")}
                 >
-                  <div
-                    className="mb-2 h-8 w-8 rounded-lg"
-                    style={{ backgroundColor: bg.color }}
+                  <img
+                    src={bg.thumbSrc}
+                    alt=""
+                    className="mb-2 h-14 w-full rounded-lg border border-border/40 object-cover object-center"
                   />
                   <p className="text-sm font-medium">{bg.label}</p>
                   <p className="text-xs text-muted-foreground">{bg.description}</p>
@@ -1995,9 +2036,13 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
               Captions off
             </button>
           </div>
-          <MoreOptions>
-            <p>Full-screen talking head places captions at the bottom when enabled.</p>
-          </MoreOptions>
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            {captionsEnabled
+              ? talkingMode === "half"
+                ? "Split-screen layout: captions appear centered on the frame, timed to your narration."
+                : "Full-screen layout: captions appear along the bottom, timed to your narration."
+              : "Captions won't be burned into the exported video."}
+          </p>
         </CardContent>
       </Card>
 
@@ -2097,10 +2142,23 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
 
       <VideoWizardFooter
         step={wizardStep}
-        canGoNext={wizardStep === 1 ? step1Ready : step2Ready}
+        canGoNext={
+          wizardStep === 1
+            ? step1Phase === "headshot"
+              ? step1HeadshotReady
+              : voiceReady && !voiceUploadBusy
+            : step2Ready
+        }
         canGenerate={canGenerate}
         creditCost={videoExportBananaCredits}
-        nextLabel={wizardStep === 1 ? "Continue to script" : "Continue to look"}
+        nextLabel={
+          wizardStep === 1
+            ? step1Phase === "headshot"
+              ? "Continue to voice"
+              : "Continue to script"
+            : "Continue to look"
+        }
+        showBack={wizardStep > 1 || (wizardStep === 1 && step1Phase === "voice")}
         onBack={handleWizardBack}
         onNext={handleWizardNext}
         onGenerate={handleGenerate}

@@ -1,9 +1,9 @@
 import { currentUser } from "@clerk/nextjs/server"
 import Link from "next/link"
 import { getManifestStore } from "@/lib/storage"
-import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { GuestMediaEmptyCtas } from "@/components/layout/GuestMediaEmptyCtas"
+import { MediaListCard, MediaListPageHeader } from "@/components/layout/MediaListCard"
 import { Video, Plus, Share2 } from "lucide-react"
 import type { VideoManifest } from "@/lib/manifests/types"
 import { formatVideoListSubtitle } from "@/lib/video/backgrounds"
@@ -30,7 +30,7 @@ export default async function VideoListPage() {
             Sign in to keep a library here, or jump straight into the creator.
           </p>
         </div>
-        <div className="rounded-xl border border-dashed border-border/60 bg-card/30 p-10 text-center space-y-4">
+        <div className="rounded-xl border border-dashed border-border/60 bg-card/30 p-6 text-center space-y-4 sm:p-10">
           <Video className="mx-auto h-8 w-8 text-muted-foreground/50" />
           <p className="text-sm text-muted-foreground">
             You don&apos;t have any saved videos yet. Make your first video — you can sign in later to
@@ -64,23 +64,21 @@ export default async function VideoListPage() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Your Videos</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {videos.length} video{videos.length !== 1 ? "s" : ""}
-          </p>
-        </div>
-        <Button asChild size="sm">
-          <Link href={VIDEO_NEW_HREF}>
-            <Plus className="mr-1.5 h-4 w-4" />
-            New
-          </Link>
-        </Button>
-      </div>
+      <MediaListPageHeader
+        title="Your Videos"
+        subtitle={`${videos.length} video${videos.length !== 1 ? "s" : ""}`}
+        action={
+          <Button asChild size="sm" className="w-full sm:w-auto">
+            <Link href={VIDEO_NEW_HREF}>
+              <Plus className="mr-1.5 h-4 w-4" />
+              New
+            </Link>
+          </Button>
+        }
+      />
 
       {videos.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-border/60 bg-card/30 p-10 text-center space-y-3">
+        <div className="rounded-xl border border-dashed border-border/60 bg-card/30 p-6 text-center space-y-3 sm:p-10">
           <Video className="mx-auto h-8 w-8 text-muted-foreground/50" />
           <p className="text-sm text-muted-foreground">No videos yet — create one to see it here.</p>
           <Button asChild size="sm" variant="outline">
@@ -88,62 +86,49 @@ export default async function VideoListPage() {
           </Button>
         </div>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-2 sm:gap-4">
           {videos.map((video) => {
             const badge = STATUS_BADGE[video.status]
+            const dateStr = new Date(video.updatedAt).toLocaleDateString()
+            const subtitle = `${formatVideoListSubtitle(video)} · ${dateStr}`
+            const viewHref =
+              video.status === "draft"
+                ? videoEditHref(video.id)
+                : `/app/video/${video.id}`
+
             return (
-              <Card key={video.id} className="min-w-0 overflow-hidden border-border/60 bg-card/50">
-                <CardHeader className="pb-2">
-                  <div className="flex min-w-0 items-start gap-2">
-                    <Video className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-                    <div className="min-w-0 flex-1 overflow-hidden">
-                      <Link
-                        href={
-                          video.status === "draft"
-                            ? videoEditHref(video.id)
-                            : `/app/video/${video.id}`
-                        }
-                        className="block w-full min-w-0 truncate font-semibold hover:underline"
-                      >
-                        {video.title}
-                      </Link>
-                      <p className="truncate text-xs text-muted-foreground">
-                        {formatVideoListSubtitle(video)}
-                      </p>
-                    </div>
-                    <span
-                      className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${badge.className}`}
-                    >
-                      {badge.label}
-                    </span>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <p className="text-xs text-muted-foreground">
-                    {new Date(video.updatedAt).toLocaleDateString()}
-                  </p>
-                  <div className="flex gap-2">
+              <MediaListCard
+                key={video.id}
+                icon={Video}
+                title={video.title}
+                titleHref={viewHref}
+                subtitle={subtitle}
+                badge={badge}
+                actions={
+                  <>
                     {video.status === "draft" ? (
-                      <Button asChild variant="outline" size="sm" className="flex-1 text-xs">
+                      <Button asChild variant="outline" size="sm" className="h-11 flex-1 text-xs">
                         <Link href={videoEditHref(video.id)}>Continue</Link>
                       </Button>
                     ) : (
-                      <Button asChild variant="outline" size="sm" className="flex-1 text-xs">
+                      <Button asChild variant="outline" size="sm" className="h-11 flex-1 text-xs">
                         <Link href={`/app/video/${video.id}`}>View</Link>
                       </Button>
                     )}
                     {video.status === "complete" && (
-                      <Button asChild variant="outline" size="sm" className="flex-1 text-xs">
+                      <Button asChild variant="outline" size="sm" className="h-11 flex-1 text-xs">
                         <Link href={`/v/${video.id}`} target="_blank">
                           <Share2 className="mr-1 h-3 w-3" />
                           Share
                         </Link>
                       </Button>
                     )}
-                  </div>
-                  <DeleteVideoButton id={video.id} redirectTo="/app/video" />
-                </CardContent>
-              </Card>
+                  </>
+                }
+                deleteAction={
+                  <DeleteVideoButton id={video.id} redirectTo="/app/video" variant="icon" />
+                }
+              />
             )
           })}
         </div>

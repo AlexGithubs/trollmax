@@ -1,4 +1,4 @@
-import type { Metadata } from "next"
+import type { Metadata, Viewport } from "next"
 import { Geist, Geist_Mono } from "next/font/google"
 import { ClerkProvider } from "@clerk/nextjs"
 import { clerkAppearance } from "@/lib/clerk-appearance"
@@ -32,6 +32,12 @@ export const metadata: Metadata = {
     description:
       "Brainrot video generation & voice cloning soundboards for the meme economy.",
   },
+}
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 }
 
 export default function RootLayout({

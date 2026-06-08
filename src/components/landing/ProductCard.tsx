@@ -15,6 +15,19 @@ interface ProductCardProps {
   accent?: string
 }
 
+function FeatureList({ features }: { features: string[] }) {
+  return (
+    <ul className="space-y-2">
+      {features.map((f) => (
+        <li key={f} className="flex items-start gap-2 text-sm text-muted-foreground">
+          <span className="text-primary">✓</span>
+          <span>{f}</span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 export function ProductCard({
   icon: Icon,
   title,
@@ -25,9 +38,12 @@ export function ProductCard({
   ctaHref,
   accent = "text-primary",
 }: ProductCardProps) {
+  const previewFeatures = features.slice(0, 2)
+  const extraFeatures = features.slice(2)
+
   return (
-    <Card className="flex flex-col border-border/60 bg-card/50 backdrop-blur-sm hover:border-primary/40 transition-colors duration-200">
-      <CardHeader className="pb-4">
+    <Card size="compact" className="flex flex-col border-border/60 bg-card/50 backdrop-blur-sm transition-colors duration-200 hover:border-primary/40 sm:py-6">
+      <CardHeader size="compact" className="pb-4 sm:px-6">
         <div className="flex items-center justify-between">
           <div className={`rounded-lg bg-primary/10 p-2.5 ${accent}`}>
             <Icon className="h-6 w-6" />
@@ -38,23 +54,30 @@ export function ProductCard({
             </Badge>
           )}
         </div>
-        <h3 className="text-xl font-bold tracking-tight mt-3">{title}</h3>
-        <p className="text-sm text-muted-foreground leading-relaxed">{description}</p>
+        <h3 className="mt-3 text-xl font-bold tracking-tight">{title}</h3>
+        <p className="text-sm leading-relaxed text-muted-foreground">{description}</p>
       </CardHeader>
 
-      <CardContent className="flex-1">
-        <ul className="space-y-2">
-          {features.map((f) => (
-            <li key={f} className="flex items-center gap-2 text-sm text-muted-foreground">
-              <span className="text-primary">✓</span>
-              {f}
-            </li>
-          ))}
-        </ul>
+      <CardContent size="compact" className="flex-1 sm:px-6">
+        <div className="sm:hidden">
+          <FeatureList features={previewFeatures} />
+          {extraFeatures.length > 0 && (
+            <details className="mt-2">
+              <summary className="cursor-pointer text-sm font-medium text-primary">
+                +{extraFeatures.length} more features
+              </summary>
+              <div className="mt-2">
+                <FeatureList features={extraFeatures} />
+              </div>
+            </details>
+          )}
+        </div>
+        <div className="hidden sm:block">
+          <FeatureList features={features} />
+        </div>
       </CardContent>
 
-      <CardFooter>
-        {/* Clerk middleware will redirect to sign-in if unauthenticated */}
+      <CardFooter className="px-4 sm:px-6">
         <Button asChild className="w-full">
           <Link href={ctaHref}>{ctaLabel}</Link>
         </Button>

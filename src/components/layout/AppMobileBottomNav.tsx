@@ -7,10 +7,10 @@ import { cn } from "@/lib/utils"
 
 function navItemClass(active: boolean) {
   return cn(
-    "flex flex-1 flex-col items-center justify-center gap-0.5 py-1 text-[10px] font-medium transition-colors",
+    "flex min-h-11 flex-1 flex-col items-center justify-center gap-0.5 py-1 text-xs font-medium transition-colors",
     active
-      ? "text-primary"
-      : "text-muted-foreground hover:text-foreground"
+      ? "border-t-2 border-primary text-primary"
+      : "border-t-2 border-transparent text-muted-foreground hover:text-foreground"
   )
 }
 
@@ -27,7 +27,7 @@ export function AppMobileBottomNav({ showDashboard }: { showDashboard: boolean }
   const soundboardActive = path === "/app/soundboard" || path.startsWith("/app/soundboard/")
 
   return (
-    <nav className="fixed bottom-0 inset-x-0 z-40 flex h-16 items-stretch border-t border-border/50 bg-background/95 backdrop-blur-md supports-[backdrop-filter]:bg-background/80 lg:hidden">
+    <nav className="fixed inset-x-0 bottom-0 z-40 flex min-h-[var(--app-bottom-nav-h)] items-stretch border-t border-border/50 bg-background/95 pb-[var(--app-safe-bottom)] backdrop-blur-md supports-[backdrop-filter]:bg-background/80 lg:hidden">
       {showDashboard && (
         <Link
           href="/app"

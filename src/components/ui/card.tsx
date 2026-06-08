@@ -2,12 +2,17 @@ import * as React from "react"
 
 import { cn } from "@/lib/utils"
 
-function Card({ className, ...props }: React.ComponentProps<"div">) {
+function Card({
+  className,
+  size,
+  ...props
+}: React.ComponentProps<"div"> & { size?: "default" | "compact" }) {
   return (
     <div
       data-slot="card"
       className={cn(
-        "flex flex-col gap-6 rounded-xl border bg-card py-6 text-card-foreground shadow-sm",
+        "flex flex-col rounded-xl border bg-card text-card-foreground shadow-sm",
+        size === "compact" ? "gap-3 py-3" : "gap-6 py-6",
         className
       )}
       {...props}
@@ -15,12 +20,17 @@ function Card({ className, ...props }: React.ComponentProps<"div">) {
   )
 }
 
-function CardHeader({ className, ...props }: React.ComponentProps<"div">) {
+function CardHeader({
+  className,
+  size,
+  ...props
+}: React.ComponentProps<"div"> & { size?: "default" | "compact" }) {
   return (
     <div
       data-slot="card-header"
       className={cn(
-        "@container/card-header grid auto-rows-min grid-rows-[auto_auto] items-start gap-2 px-6 has-data-[slot=card-action]:grid-cols-[1fr_auto] [.border-b]:pb-6",
+        "@container/card-header grid auto-rows-min grid-rows-[auto_auto] items-start gap-2 has-data-[slot=card-action]:grid-cols-[1fr_auto] [.border-b]:pb-6",
+        size === "compact" ? "px-4" : "px-6",
         className
       )}
       {...props}
@@ -61,11 +71,15 @@ function CardAction({ className, ...props }: React.ComponentProps<"div">) {
   )
 }
 
-function CardContent({ className, ...props }: React.ComponentProps<"div">) {
+function CardContent({
+  className,
+  size,
+  ...props
+}: React.ComponentProps<"div"> & { size?: "default" | "compact" }) {
   return (
     <div
       data-slot="card-content"
-      className={cn("px-6", className)}
+      className={cn(size === "compact" ? "px-4" : "px-6", className)}
       {...props}
     />
   )

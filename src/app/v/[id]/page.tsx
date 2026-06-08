@@ -75,11 +75,11 @@ export default async function VideoSharePage({
       <SiteHeader />
       <main className="flex-1 px-4 py-10">
         <div className="mx-auto max-w-sm space-y-8">
-          <div className="flex items-start justify-between gap-3">
+          <div className="flex items-start justify-between gap-3 flex-wrap">
             <div className="min-w-0 space-y-1">
-              <h1 className="text-2xl font-bold tracking-tight">{manifest.title}</h1>
+              <h1 className="text-2xl font-bold tracking-tight sm:text-2xl">{manifest.title}</h1>
             </div>
-            <div className="flex shrink-0 items-center gap-2">
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
               <VideoDownloadButton videoId={id} title={manifest.title} />
               <ShareMenu shareUrl={shareUrl} kind="video" />
             </div>

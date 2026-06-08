@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" role="img" aria-label="Minecraft parkour">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#7ec8ff"/>
+      <stop offset="100%" stop-color="#b8e4ff"/>
+    </linearGradient>
+    <pattern id="grass" width="8" height="8" patternUnits="userSpaceOnUse">
+      <rect width="8" height="8" fill="#5a8f3a"/>
+      <rect width="8" height="2" fill="#6fbf4a"/>
+    </pattern>
+    <pattern id="dirt" width="8" height="8" patternUnits="userSpaceOnUse">
+      <rect width="8" height="8" fill="#8b5a2b"/>
+      <rect x="0" y="0" width="4" height="4" fill="#7a4d24"/>
+      <rect x="4" y="4" width="4" height="4" fill="#9a6530"/>
+    </pattern>
+  </defs>
+  <rect width="80" height="80" fill="url(#sky)"/>
+  <rect y="52" width="80" height="28" fill="url(#grass)"/>
+  <rect x="8" y="36" width="16" height="16" fill="url(#dirt)"/>
+  <rect x="8" y="32" width="16" height="4" fill="url(#grass)"/>
+  <rect x="28" y="28" width="12" height="12" fill="url(#dirt)"/>
+  <rect x="28" y="24" width="12" height="4" fill="url(#grass)"/>
+  <rect x="44" y="20" width="12" height="12" fill="url(#dirt)"/>
+  <rect x="44" y="16" width="12" height="4" fill="url(#grass)"/>
+  <rect x="58" y="12" width="14" height="14" fill="url(#dirt)"/>
+  <rect x="58" y="8" width="14" height="4" fill="url(#grass)"/>
+  <circle cx="62" cy="10" r="2.5" fill="#ffd54f"/>
+</svg>

@@ -59,27 +59,31 @@ export default async function ManageVideoPage({
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
-      <div className="flex items-center gap-3">
-        <Button asChild variant="ghost" size="icon" className="h-8 w-8">
-          <Link href="/app/video">
-            <ArrowLeft className="h-4 w-4" />
-          </Link>
-        </Button>
-        <div className="min-w-0 flex-1">
-          <h1 className="truncate text-xl font-bold tracking-tight">{manifest.title}</h1>
-          <p className="text-xs text-muted-foreground">{formatVideoListSubtitle(manifest)}</p>
+      <div className="space-y-3">
+        <div className="flex items-start gap-3">
+          <Button asChild variant="ghost" size="icon" className="h-11 w-11 shrink-0">
+            <Link href="/app/video">
+              <ArrowLeft className="h-4 w-4" />
+            </Link>
+          </Button>
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 items-start gap-2">
+              <h1 className="min-w-0 flex-1 truncate text-xl font-bold tracking-tight">{manifest.title}</h1>
+              <span
+                className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${badge.className}`}
+              >
+                {badge.label}
+              </span>
+            </div>
+            <p className="text-xs text-muted-foreground">{formatVideoListSubtitle(manifest)}</p>
+          </div>
         </div>
         {manifest.status === "complete" && manifest.videoUrl ? (
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 pl-14 sm:pl-0">
             <VideoDownloadButton videoId={id} title={manifest.title} />
             <ShareMenu shareUrl={shareUrl} kind="video" />
           </div>
         ) : null}
-        <span
-          className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${badge.className}`}
-        >
-          {badge.label}
-        </span>
       </div>
 
       <details className="rounded-xl border border-border/50 bg-card/40 px-4 py-3">

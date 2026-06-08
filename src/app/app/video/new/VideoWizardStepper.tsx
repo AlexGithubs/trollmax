@@ -22,15 +22,24 @@ export function VideoWizardStepper({ current, onStepClick }: Props) {
           Step {current} of 3 · {STEPS[current - 1]!.label}
         </p>
         <div className="flex gap-1">
-          {STEPS.map((s) => (
-            <span
-              key={s.num}
-              className={cn(
-                "h-1.5 w-6 rounded-full transition-colors",
-                s.num <= current ? "bg-primary" : "bg-border/60"
-              )}
-            />
-          ))}
+          {STEPS.map((s) => {
+            const done = s.num < current
+            const clickable = done && onStepClick
+            return (
+              <button
+                key={s.num}
+                type="button"
+                disabled={!clickable}
+                onClick={() => clickable && onStepClick?.(s.num)}
+                aria-label={s.label}
+                className={cn(
+                  "h-1.5 w-6 rounded-full transition-colors",
+                  s.num <= current ? "bg-primary" : "bg-border/60",
+                  clickable && "cursor-pointer"
+                )}
+              />
+            )
+          })}
         </div>
       </div>
 

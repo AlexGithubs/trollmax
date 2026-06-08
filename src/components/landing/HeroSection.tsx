@@ -44,11 +44,12 @@ export function HeroSection() {
 
         <div className="relative mx-auto max-w-6xl px-4 pb-8 pt-14 sm:pb-12 sm:pt-20 md:pt-24">
           <div className="mb-6 flex flex-col items-center text-center">
-            <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-primary/35 bg-primary/10 px-4 py-1.5 text-xs font-medium text-primary backdrop-blur-sm">
+            <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-primary/35 bg-primary/10 px-3 py-1.5 text-[11px] font-medium text-primary backdrop-blur-sm sm:px-4 sm:text-xs">
               <Zap className="size-3.5 fill-primary" aria-hidden />
-              Brainrot video and voice cloning for the meme economy
+              <span className="sm:hidden">Brainrot video + voice cloning</span>
+              <span className="hidden sm:inline">Brainrot video and voice cloning for the meme economy</span>
             </div>
-            <h1 className="max-w-4xl text-4xl font-extrabold leading-[1.08] tracking-tight sm:text-6xl md:text-7xl">
+            <h1 className="max-w-4xl text-4xl font-extrabold leading-[1.08] tracking-tight sm:text-5xl md:text-6xl lg:text-7xl">
               <span className="block">Clone anyone.</span>
               <span className="landing-title-shimmer mt-1 block sm:mt-2">
                 Troll everyone.
@@ -62,14 +63,14 @@ export function HeroSection() {
             </p>
 
             <div className="mt-8 flex w-full max-w-md flex-col gap-3 sm:max-w-none sm:flex-row sm:justify-center">
-              <Button asChild size="lg" className="h-12 min-w-[11rem] px-8 text-base shadow-lg shadow-primary/20">
+              <Button asChild size="lg" className="h-12 w-full px-8 text-base shadow-lg shadow-primary/20 sm:min-w-[11rem] sm:w-auto">
                 <Link href="/app/video/new">Make a video</Link>
               </Button>
               <Button
                 asChild
                 size="lg"
                 variant="outline"
-                className="h-12 min-w-[11rem] border-primary/35 bg-background/50 px-8 text-base backdrop-blur-sm hover:bg-primary/10"
+                className="h-12 w-full border-primary/35 bg-background/50 px-8 text-base backdrop-blur-sm hover:bg-primary/10 sm:min-w-[11rem] sm:w-auto"
               >
                 <Link href="/app/soundboard/new">Build a soundboard</Link>
               </Button>
