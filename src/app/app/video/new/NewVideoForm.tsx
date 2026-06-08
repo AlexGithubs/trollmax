@@ -1315,11 +1315,11 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
 
   if (stage === "generating") {
     return (
-      <div className="fixed inset-0 z-[60] flex flex-col overflow-y-auto bg-background px-4 py-6 pt-4">
-        <div className="mx-auto w-full max-w-lg flex-1 space-y-6">
+      <div className="fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto bg-background p-4 sm:p-6">
+        <div className="generating-overlay-panel space-y-6">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Generating Video</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
+            <p className="mt-1 text-sm text-muted-foreground text-balance">
               Your video is being created. This may take a few minutes — please keep this screen open.
             </p>
           </div>
@@ -1334,8 +1334,8 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
             <p
               className={
                 generationErrorKind === "capability_unavailable"
-                  ? "rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-300"
-                  : "rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+                  ? "rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-left text-sm text-amber-800 dark:text-amber-300 sm:text-center"
+                  : "rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-left text-sm text-destructive sm:text-center"
               }
             >
               {error}
@@ -1591,7 +1591,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
                 }}
                 onClick={() => !headshotUploading && headshotInputRef.current?.click()}
                 className={cn(
-                  "flex w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed py-8 text-sm text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground",
+                  "upload-dropzone flex w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed py-8 text-sm text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground",
                   headshotDragActive && !headshotUploading
                     ? "border-primary bg-primary/10 text-foreground"
                     : "border-border/60",
@@ -1604,7 +1604,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
                     ? headshotBusyLabel ?? "Working…"
                     : "Drop an image here or click to browse"}
                 </span>
-                <span className="text-xs opacity-70">
+                <span className="upload-dropzone-hint text-xs opacity-70">
                   JPG, PNG, WebP, HEIC, GIF… · max ~25 MB · converted to JPEG automatically
                 </span>
               </div>
@@ -1896,7 +1896,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
                     if (!voiceUploadBusy) voiceFileInputRef.current?.click()
                   }}
                   className={cn(
-                    "flex w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border/60 bg-secondary/10 px-4 py-6 text-center transition-colors hover:border-primary/40 hover:bg-primary/5",
+                    "upload-dropzone flex w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border/60 bg-secondary/10 px-4 py-6 text-center transition-colors hover:border-primary/40 hover:bg-primary/5",
                     voiceDragActive && !voiceUploadBusy && "border-primary bg-primary/10",
                     voiceUploadBusy && "pointer-events-none opacity-60"
                   )}
@@ -1913,7 +1913,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
                       <Upload className="h-6 w-6 text-muted-foreground" />
                       <div>
                         <p className="text-sm font-medium">Drop audio/video here or click to browse</p>
-                        <p className="mt-0.5 text-xs text-muted-foreground">
+                        <p className="upload-dropzone-hint mt-0.5 text-xs text-muted-foreground">
                           MP3, WAV, M4A, or video with audio · 6–60 sec · 15 MB max
                         </p>
                       </div>

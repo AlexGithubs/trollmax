@@ -596,10 +596,10 @@ export default function NewSoundboardPage() {
 
   if (stage === "generating") {
     return (
-      <div className="fixed inset-0 z-[60] flex flex-col overflow-y-auto bg-background px-4 py-6 pt-4">
-        <div className="mx-auto w-full max-w-lg flex-1 space-y-4">
+      <div className="fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto bg-background p-4 sm:p-6">
+        <div className="generating-overlay-panel space-y-4">
           {error && (
-            <p className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+            <p className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-left text-sm text-destructive sm:text-center">
               {error}
             </p>
           )}
@@ -851,7 +851,7 @@ export default function NewSoundboardPage() {
                   if (!busy) fileInputRef.current?.click()
                 }}
                 className={cn(
-                  "flex w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border/60 py-8 text-sm text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground",
+                  "upload-dropzone flex w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border/60 py-8 text-sm text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground",
                   voiceDragActive && !busy && "border-primary bg-primary/10 text-foreground",
                   busy && "pointer-events-none opacity-50"
                 )}
@@ -870,8 +870,8 @@ export default function NewSoundboardPage() {
                   <>
                     <Upload className="h-6 w-6" />
                     <span>Drop audio/video here or click to browse</span>
-                    <span className="text-xs opacity-70">
-                      Best results with 10-20s of clear speech · audio or video (mp4, mov, …) · max 15 MB audio /
+                    <span className="upload-dropzone-hint text-xs opacity-70">
+                      Best results with 10–20s of clear speech · audio or video (mp4, mov, …) · max 15 MB audio /
                       80 MB video · up to 60s
                     </span>
                   </>

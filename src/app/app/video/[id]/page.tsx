@@ -79,7 +79,7 @@ export default async function ManageVideoPage({
           </div>
         </div>
         {manifest.status === "complete" && manifest.videoUrl ? (
-          <div className="flex flex-wrap items-center gap-2 pl-14 sm:pl-0">
+          <div className="flex flex-wrap items-center justify-center gap-2 sm:justify-start">
             <VideoDownloadButton videoId={id} title={manifest.title} />
             <ShareMenu shareUrl={shareUrl} kind="video" />
           </div>

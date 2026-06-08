@@ -19,9 +19,9 @@ export function GeneratingCard({
 
   return (
     <Card className="border-border/60 bg-card/50">
-      <CardContent className="pt-8 pb-8 flex flex-col items-center gap-5">
+      <CardContent className="flex w-full flex-col items-center gap-5 pt-8 pb-8 text-center">
         {/* Waveform bars */}
-        <div className="flex items-end gap-1 h-8">
+        <div className="flex h-8 items-end gap-1">
           {Array.from({ length: BARS }, (_, i) => (
             <div
               key={i}
@@ -36,7 +36,7 @@ export function GeneratingCard({
         </div>
 
         {/* Status text */}
-        <div className="text-center space-y-1">
+        <div className="generating-status-text space-y-1">
           <p className="text-sm font-medium">
             {lastError ? "Generation failed" : progressStep || "Generating…"}
           </p>

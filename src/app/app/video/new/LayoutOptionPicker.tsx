@@ -85,13 +85,13 @@ export function LayoutOptionPicker({ value, onChange }: Props) {
               type="button"
               onClick={() => onChange(opt.mode)}
               className={cn(
-                "rounded-xl border-2 p-3 text-left transition-colors sm:flex sm:flex-col sm:p-4",
+                "rounded-xl border-2 p-3 text-center transition-colors sm:flex sm:flex-col sm:p-4 sm:text-left",
                 selected
                   ? "border-primary bg-primary/5 ring-2 ring-primary/25"
                   : "border-border/40 hover:border-border/80"
               )}
             >
-              <div className="flex items-start gap-3 sm:flex-col sm:items-stretch">
+              <div className="flex flex-col items-center gap-3 sm:flex-col sm:items-stretch">
                 <LayoutWireframe mode={opt.mode} compact />
                 <div className="min-w-0 flex-1 sm:mt-3">
                   <p className="text-sm font-semibold">{opt.title}</p>

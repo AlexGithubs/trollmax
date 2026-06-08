@@ -187,6 +187,33 @@ body {
   }
 }
 
+/* Upload / drop zones — flex items-center alone does not center wrapped hint text on narrow screens */
+.upload-dropzone {
+  text-align: center;
+  padding-inline: 1rem;
+}
+
+.upload-dropzone-hint {
+  max-width: 18rem;
+  margin-inline: auto;
+  text-wrap: balance;
+}
+
+/* Full-screen generation overlay content */
+.generating-overlay-panel {
+  width: 100%;
+  max-width: 32rem;
+  text-align: center;
+}
+
+.generating-status-text {
+  width: 100%;
+  max-width: 20rem;
+  margin-inline: auto;
+  text-align: center;
+  text-wrap: balance;
+}
+
 /* Styled scrollbar for preset grids */
 .preset-scroll {
   scrollbar-width: thin;

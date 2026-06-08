@@ -4,9 +4,9 @@ TROLLMAX Video Composer — Modal FastAPI app
 Accepts audio + background type + captions, renders a 9:16 MP4 with
 burned-in captions using FFmpeg, and returns raw MP4 bytes.
 
-D-ID talking-head (when talkingVideoUrl is set):
-  - talkingMode full (default): D-ID padded to 886×1575 inside 1080×1920 canvas.
-  - talkingMode half: top 960px D-ID, bottom 960px gameplay or solid color.
+Talking-head (when talkingVideoUrl is set — HeyGen or D-ID):
+  - talkingMode full (default): scale/crop to fill 1080×1920 (no letterboxing).
+  - talkingMode half: top 960px talking head, bottom 960px gameplay or solid color.
 
 Backgrounds (half bottom, or legacy compose without D-ID):
   - asset:minecraft     => bundled gameplay clip in modal/assets/minecraft-source.mp4
@@ -269,12 +269,38 @@ def _resolve_background_clip(background_asset: Optional[str]) -> Optional[str]:
 
 # Caption styling constants
 _CAPTION_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-_CAPTION_FONTSIZE = 88
-_CAPTION_BORDERW = 8
+_CAPTION_FONTSIZE = 76
+_CAPTION_BORDERW = 6
+_CAPTION_LINE_SPACING = 10
+_CAPTION_MAX_LINE_CHARS = 18
+_CAPTION_MAX_LINES = 2
 
 
 def _caption_display_text(text: str) -> str:
-    return text.strip().lower()
+    """Lowercase + wrap so drawtext stays inside the 1080px frame."""
+    words = text.strip().lower().split()
+    if not words:
+        return ""
+
+    lines: list[str] = []
+    current: list[str] = []
+    current_len = 0
+    for word in words:
+        extra = len(word) + (1 if current else 0)
+        if current and current_len + extra > _CAPTION_MAX_LINE_CHARS:
+            lines.append(" ".join(current))
+            current = [word]
+            current_len = len(word)
+        else:
+            current.append(word)
+            current_len += extra
+        if len(lines) >= _CAPTION_MAX_LINES:
+            break
+
+    if len(lines) < _CAPTION_MAX_LINES and current:
+        lines.append(" ".join(current))
+
+    return "\n".join(lines[:_CAPTION_MAX_LINES])
 
 
 def _write_caption_text_files(tmpdir: str, captions: list[Caption]) -> list[str]:
@@ -298,6 +324,8 @@ def _drawtext(textfile_path: str, start_s: float, end_s: float, *, y_expr: str) 
         f":borderw={_CAPTION_BORDERW}"
         f":bordercolor=black"
         f":shadowcolor=black:shadowx=2:shadowy=2"
+        f":line_spacing={_CAPTION_LINE_SPACING}"
+        f":fix_bounds=1"
         f":x=(w-text_w)/2"
         f":y={y_expr}"
         f":enable='between(t,{start_s:.3f},{end_s:.3f})'"
@@ -328,15 +356,10 @@ def _build_audio_volume_filter(vol: float, audio_input_idx: int) -> tuple[str, s
 # ── Filter builders ───────────────────────────────────────────────────────────
 
 def _build_talking_full_filter(captions: list[Caption], paths: list[str]) -> str:
-    """Full-mode talking head: scale to fill 1080×1920, captions at bottom.
-
-    HeyGen outputs a true 9:16 portrait at 1080p with no internal face-zoom,
-    so we scale to fill the full canvas. The pad step is a no-op for a perfect
-    9:16 source but harmlessly centres any slightly off-ratio input.
-    """
+    """Full-mode talking head: fill-crop to 1080×1920, captions at bottom."""
     base = (
-        "[0:v]scale=1080:1920:force_original_aspect_ratio=decrease,"
-        "pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black,setsar=1[bg]"
+        "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,"
+        "crop=1080:1920,setsar=1[bg]"
     )
     if not captions:
         return f"{base};[bg]copy[v]"
@@ -345,11 +368,11 @@ def _build_talking_full_filter(captions: list[Caption], paths: list[str]) -> str
 
 
 def _build_talking_half_filter(captions: list[Caption], paths: list[str]) -> str:
-    """Half-mode D-ID: talking head fills top 960px, background fills bottom 960px."""
+    """Half-mode: talking head fill-crops top 960px, background fills bottom 960px."""
     top = (
         "[0:v]fps=24,"
-        "scale=886:788:force_original_aspect_ratio=decrease,"
-        "pad=1080:960:(ow-iw)/2:(oh-ih)/2:black,setsar=1[top]"
+        "scale=1080:960:force_original_aspect_ratio=increase,"
+        "crop=1080:960,setsar=1[top]"
     )
     bottom = (
         "[1:v]fps=24,scale=1080:960:force_original_aspect_ratio=increase,"
