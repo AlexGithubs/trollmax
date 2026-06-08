@@ -209,6 +209,7 @@ export async function POST(req: Request) {
     ...(resolvedRefText ? { voiceRefText: resolvedRefText } : {}),
     clips: [],
     phrases: phrasesTrimmed,
+    status: "draft",
     isPublic: true,
     consentAcknowledged: true,
     ownerId: user.id,

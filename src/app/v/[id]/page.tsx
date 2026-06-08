@@ -4,6 +4,7 @@ import { getManifestStore } from "@/lib/storage"
 import type { VideoManifest } from "@/lib/manifests/types"
 import { VideoPlayer } from "@/components/video/VideoPlayer"
 import { ShareMenu } from "@/components/share/ShareMenu"
+import { VideoDownloadButton } from "@/components/video/VideoDownloadButton"
 import { Video, ArrowRight } from "lucide-react"
 import Link from "next/link"
 import { getSiteBaseUrl } from "@/lib/site-url"
@@ -78,11 +79,10 @@ export default async function VideoSharePage({
             <div className="min-w-0 space-y-1">
               <h1 className="text-2xl font-bold tracking-tight">{manifest.title}</h1>
             </div>
-            <ShareMenu
-              shareUrl={shareUrl}
-              kind="video"
-              className="shrink-0"
-            />
+            <div className="flex shrink-0 items-center gap-2">
+              <VideoDownloadButton videoId={id} title={manifest.title} />
+              <ShareMenu shareUrl={shareUrl} kind="video" />
+            </div>
           </div>
 
           <VideoPlayer videoUrl={manifest.videoUrl} videoId={id} />

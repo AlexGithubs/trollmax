@@ -5,8 +5,13 @@ import { getManifestStore } from "@/lib/storage"
 import { Button } from "@/components/ui/button"
 import { ArrowLeft, Info } from "lucide-react"
 import type { SoundboardManifest } from "@/lib/manifests/types"
+import {
+  MANIFEST_STATUS_BADGE,
+  resolveSoundboardStatus,
+} from "@/lib/manifests/status-badge"
 import { SoundboardPlayer } from "@/components/soundboard/SoundboardPlayer"
 import { ShareMenu } from "@/components/share/ShareMenu"
+import { SoundboardVideoUpsell } from "@/components/soundboard/SoundboardVideoUpsell"
 import { DeleteBoardButton } from "@/components/soundboard/DeleteBoardButton"
 import { getSiteBaseUrl } from "@/lib/site-url"
 
@@ -34,6 +39,16 @@ export default async function ManageSoundboardPage({
   const baseUrl = getSiteBaseUrl() ?? "http://localhost:3000"
   const shareUrl = `${baseUrl}/s/${id}`
 
+  const status = resolveSoundboardStatus(manifest)
+  const badge = MANIFEST_STATUS_BADGE[status]
+  const hasClips = manifest.clips.length > 0
+  const videoUpsellHref = hasClips
+    ? `/app/video/new?${new URLSearchParams({
+        soundboardId: id,
+        title: `${manifest.title} video`,
+      }).toString()}`
+    : null
+
   return (
     <div className="mx-auto max-w-2xl space-y-6">
       <div className="flex items-center gap-3">
@@ -43,10 +58,19 @@ export default async function ManageSoundboardPage({
           </Link>
         </Button>
         <div className="min-w-0 flex-1">
-          <h1 className="truncate text-xl font-bold tracking-tight">{manifest.title}</h1>
+          <div className="flex min-w-0 items-center gap-2">
+            <h1 className="truncate text-xl font-bold tracking-tight">{manifest.title}</h1>
+            <span
+              className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${badge.className}`}
+            >
+              {badge.label}
+            </span>
+          </div>
           <p className="text-xs text-muted-foreground">{manifest.speakerLabel}</p>
         </div>
-        <ShareMenu shareUrl={shareUrl} kind="soundboard" className="shrink-0" />
+        {status === "complete" && (
+          <ShareMenu shareUrl={shareUrl} kind="soundboard" className="shrink-0" />
+        )}
       </div>
 
       <details className="rounded-xl border border-border/50 bg-card/40 px-4 py-3">
@@ -83,11 +107,14 @@ export default async function ManageSoundboardPage({
         </div>
       </details>
 
-      {manifest.clips.length > 0 ? (
-        <SoundboardPlayer
-          clips={manifest.clips}
-          voicePresetId={manifest.voicePresetId}
-        />
+      {hasClips ? (
+        <>
+          <SoundboardPlayer
+            clips={manifest.clips}
+            voicePresetId={manifest.voicePresetId}
+          />
+          {videoUpsellHref ? <SoundboardVideoUpsell href={videoUpsellHref} /> : null}
+        </>
       ) : (
         <div className="rounded-xl border border-border/40 bg-card/30 p-6 text-center text-sm text-muted-foreground">
           No clips yet.{" "}

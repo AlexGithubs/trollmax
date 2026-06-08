@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { currentUser } from "@clerk/nextjs/server"
 import { getManifestStore } from "@/lib/storage"
 import type { SoundboardManifest } from "@/lib/manifests/types"
+import { resolveSoundboardStatus } from "@/lib/manifests/status-badge"
 
 export async function GET(
   _req: Request,
@@ -29,7 +30,7 @@ export async function GET(
     : null
 
   return NextResponse.json({
-    status: manifest.status ?? (manifest.clips?.length ? "complete" : "draft"),
+    status: resolveSoundboardStatus(manifest),
     progressStep: manifest.progressStep ?? null,
     progressPct: typeof manifest.progressPct === "number" ? manifest.progressPct : null,
     progressDetail: manifest.progressDetail ?? null,

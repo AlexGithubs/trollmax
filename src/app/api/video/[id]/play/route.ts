@@ -6,6 +6,15 @@ import { getManifestStore } from "@/lib/storage"
 import { downloadBlobBuffer } from "@/lib/storage/blob"
 import type { VideoManifest } from "@/lib/manifests/types"
 
+function safeDownloadFilename(title: string): string {
+  const base = title.replace(/[^\w\s.-]/g, "").trim().slice(0, 80)
+  return base ? `${base}.mp4` : "video.mp4"
+}
+
+function contentDisposition(inline: boolean, title: string): string {
+  return inline ? "inline" : `attachment; filename="${safeDownloadFilename(title)}"`
+}
+
 /**
  * Stream a completed video to the browser with full byte-range support.
  *
@@ -43,9 +52,11 @@ export async function GET(
   }
 
   const total = buffer.length
+  const isDownload = new URL(req.url).searchParams.get("download") === "1"
+  const disposition = contentDisposition(!isDownload, manifest.title)
   const range = req.headers.get("range")
 
-  if (range) {
+  if (range && !isDownload) {
     const m = /bytes=(\d+)-(\d*)/.exec(range)
     if (m) {
       const start = parseInt(m[1], 10)
@@ -58,7 +69,7 @@ export async function GET(
           "Accept-Ranges": "bytes",
           "Content-Length": String(chunk.length),
           "Content-Type": contentType,
-          "Content-Disposition": "inline",
+          "Content-Disposition": disposition,
           "Cache-Control": "private, max-age=300",
         },
       })
@@ -68,10 +79,10 @@ export async function GET(
   return new NextResponse(new Uint8Array(buffer), {
     status: 200,
     headers: {
-      "Accept-Ranges": "bytes",
+      "Accept-Ranges": isDownload ? "none" : "bytes",
       "Content-Length": String(total),
       "Content-Type": contentType,
-      "Content-Disposition": "inline",
+      "Content-Disposition": disposition,
       "Cache-Control": "private, max-age=300",
     },
   })

@@ -7,6 +7,10 @@ import { Button } from "@/components/ui/button"
 import { GuestMediaEmptyCtas } from "@/components/layout/GuestMediaEmptyCtas"
 import { Mic2, Plus, Share2 } from "lucide-react"
 import type { SoundboardManifest } from "@/lib/manifests/types"
+import {
+  MANIFEST_STATUS_BADGE,
+  resolveSoundboardStatus,
+} from "@/lib/manifests/status-badge"
 import { DeleteBoardButton } from "@/components/soundboard/DeleteBoardButton"
 
 export const metadata = { title: "Soundboards — TROLLMAX" }
@@ -145,7 +149,10 @@ export default async function SoundboardListPage() {
       )}
 
       <div className="grid gap-4 sm:grid-cols-2">
-        {boards.map((board) => (
+        {boards.map((board) => {
+          const status = resolveSoundboardStatus(board)
+          const badge = MANIFEST_STATUS_BADGE[status]
+          return (
           <Card key={board.id} className="min-w-0 overflow-hidden border-border/60 bg-card/50">
             <CardHeader className="pb-2">
               <div className="flex min-w-0 items-start gap-2">
@@ -159,6 +166,11 @@ export default async function SoundboardListPage() {
                   </Link>
                   <p className="truncate text-xs text-muted-foreground">{board.speakerLabel}</p>
                 </div>
+                <span
+                  className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${badge.className}`}
+                >
+                  {badge.label}
+                </span>
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -170,17 +182,20 @@ export default async function SoundboardListPage() {
                 <Button asChild variant="outline" size="sm" className="flex-1 text-xs">
                   <Link href={`/app/soundboard/${board.id}`}>Edit</Link>
                 </Button>
-                <Button asChild variant="outline" size="sm" className="flex-1 text-xs">
-                  <Link href={`/s/${board.id}`} target="_blank">
-                    <Share2 className="mr-1 h-3 w-3" />
-                    Share
-                  </Link>
-                </Button>
+                {status === "complete" && (
+                  <Button asChild variant="outline" size="sm" className="flex-1 text-xs">
+                    <Link href={`/s/${board.id}`} target="_blank">
+                      <Share2 className="mr-1 h-3 w-3" />
+                      Share
+                    </Link>
+                  </Button>
+                )}
               </div>
               <DeleteBoardButton id={board.id} shareUrl={`${baseUrl}/s/${board.id}`} />
             </CardContent>
           </Card>
-        ))}
+          )
+        })}
       </div>
     </div>
   )

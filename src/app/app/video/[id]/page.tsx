@@ -7,6 +7,7 @@ import { ArrowLeft, Loader2, AlertCircle, Info } from "lucide-react"
 import type { SoundboardManifest, VideoManifest } from "@/lib/manifests/types"
 import { VideoPlayer } from "@/components/video/VideoPlayer"
 import { ShareMenu } from "@/components/share/ShareMenu"
+import { VideoDownloadButton } from "@/components/video/VideoDownloadButton"
 import { DeleteVideoButton } from "@/components/video/DeleteVideoButton"
 import { formatVideoListSubtitle, formatBackgroundForDisplay } from "@/lib/video/backgrounds"
 import { getSiteBaseUrl } from "@/lib/site-url"
@@ -68,7 +69,10 @@ export default async function ManageVideoPage({
           <p className="text-xs text-muted-foreground">{formatVideoListSubtitle(manifest)}</p>
         </div>
         {manifest.status === "complete" && manifest.videoUrl ? (
-          <ShareMenu shareUrl={shareUrl} kind="video" className="shrink-0" />
+          <div className="flex shrink-0 items-center gap-2">
+            <VideoDownloadButton videoId={id} title={manifest.title} />
+            <ShareMenu shareUrl={shareUrl} kind="video" />
+          </div>
         ) : null}
         <span
           className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${badge.className}`}

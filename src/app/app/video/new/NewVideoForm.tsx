@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useMemo, useEffect, useRef, useCallback } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { useUser, useClerk } from "@clerk/nextjs"
 import Link from "next/link"
 import { emitBananaCreditsUpdated } from "@/lib/client/banana-credits-bridge"
@@ -186,6 +186,7 @@ interface Props {
 
 export function NewVideoForm({ boards, categories, presets }: Props) {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { isSignedIn } = useUser()
   const { openSignIn } = useClerk()
 
@@ -231,6 +232,17 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
       .then((j) => setTtsAvail(j as TtsAvailability))
       .catch(() => setTtsAvail(null))
   }, [])
+
+  useEffect(() => {
+    const boardId = searchParams.get("soundboardId")?.trim()
+    if (!boardId || !boards.some((b) => b.id === boardId)) return
+
+    setVoiceKind("board")
+    setSelectedBoardId(boardId)
+
+    const titleParam = searchParams.get("title")?.trim()
+    if (titleParam) setVideoTitle(titleParam.slice(0, 100))
+  }, [searchParams, boards])
 
   const filteredPresets = useMemo(() => {
     if (categoryFilter === "all") return presets

@@ -1,3 +1,4 @@
+import { Suspense } from "react"
 import { currentUser } from "@clerk/nextjs/server"
 import { getManifestStore } from "@/lib/storage"
 import type { SoundboardManifest } from "@/lib/manifests/types"
@@ -25,5 +26,9 @@ export default async function NewVideoPage() {
   }
 
   const { categories, presets } = voicePresetsApiPayload()
-  return <NewVideoForm boards={boards} categories={categories} presets={presets} />
+  return (
+    <Suspense fallback={null}>
+      <NewVideoForm boards={boards} categories={categories} presets={presets} />
+    </Suspense>
+  )
 }
