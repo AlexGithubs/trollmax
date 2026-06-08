@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight } from "lucide-react"
+import { ChevronLeft, ChevronRight, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   currencyIconAlt,
@@ -11,6 +11,7 @@ type Props = {
   step: WizardStep
   canGoNext: boolean
   canGenerate: boolean
+  submitting?: boolean
   creditCost: number
   nextLabel?: string
   showBack?: boolean
@@ -23,6 +24,7 @@ export function VideoWizardFooter({
   step,
   canGoNext,
   canGenerate,
+  submitting = false,
   creditCost,
   nextLabel = "Next",
   showBack,
@@ -58,10 +60,15 @@ export function VideoWizardFooter({
             type="button"
             size="lg"
             className="group h-12 min-w-0 flex-1 flex-row items-center justify-between gap-2 rounded-xl px-3 text-sm font-semibold shadow-lg shadow-primary/20 transition-all hover:shadow-xl hover:shadow-primary/30 disabled:shadow-none sm:px-4 sm:text-base"
-            disabled={!canGenerate}
+            disabled={!canGenerate || submitting}
             onClick={onGenerate}
           >
-            <span className="whitespace-nowrap tracking-tight">Generate Video</span>
+            {submitting ? (
+              <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
+            ) : null}
+            <span className="whitespace-nowrap tracking-tight">
+              {submitting ? "Starting…" : "Generate Video"}
+            </span>
             <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-white/20 bg-black/15 px-2 py-0.5 text-sm font-bold backdrop-blur-sm sm:gap-1.5 sm:px-2.5 sm:py-1">
               <img src={currencyIconSrc()} alt={currencyIconAlt()} className="h-5 w-5 object-contain sm:h-6 sm:w-6" />
               {formatCreditBadgeAmount(creditCost)}

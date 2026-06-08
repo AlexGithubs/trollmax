@@ -274,6 +274,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
   const { openSignIn } = useClerk()
 
   const [stage, setStage] = useState<Stage>("form")
+  const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState("")
   const [generationErrorKind, setGenerationErrorKind] =
     useState<VideoGenerationErrorKind>("error")
@@ -370,6 +371,8 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
   const [draftManifestId, setDraftManifestId] = useState<string | null>(null)
   const draftManifestIdRef = useRef<string | null>(null)
   const draftSaveInFlightRef = useRef(false)
+  /** Sync guard — React `submitting` state updates too late to block mobile double-taps. */
+  const submittingRef = useRef(false)
 
   const headshotDisplayUrl = useMemo(
     () => resolveHeadshotDisplayUrl(headshotPreviewUrl, headshotImageUrl, selectedHeadshotPresetId),
@@ -557,7 +560,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
   }, [router, searchParams, isSignedIn])
 
   useEffect(() => {
-    if (!draftReady || stage !== "form" || !isSignedIn) return
+    if (!draftReady || stage !== "form" || !isSignedIn || submitting) return
 
     const timer = window.setTimeout(() => {
       void persistServerDraft(draftManifestIdRef.current)
@@ -568,6 +571,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
     draftReady,
     stage,
     isSignedIn,
+    submitting,
     persistServerDraft,
     wizardStep,
     videoTitle,
@@ -989,6 +993,10 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
     setCreditGate(null)
     setError("")
     setGenerationErrorKind("error")
+    setStage("generating")
+    setProgressStep("Starting…")
+    setProgressPct(0)
+    setProgressDetail(null)
 
     let genHttpError: GenerationFailure | null = null
     let postGenBananaBalance: number | undefined
@@ -1033,11 +1041,6 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
         }
       })
 
-    const genResult = await genPromise
-    if (genResult === null) return
-
-    setStage("generating")
-
     let completed = false
     for (let attempt = 0; attempt < 900; attempt++) {
       if (genHttpError) throw genHttpError
@@ -1076,14 +1079,16 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
       await new Promise((r) => setTimeout(r, 1000))
     }
 
+    const genResult = await genPromise
+    if (genResult === null) return
+
     if (!completed) {
-      void genPromise.catch(() => {})
+      if (genHttpError) throw genHttpError
       throw new Error(
         "Generation is taking longer than expected. Check your videos list for this item, or try again in a few minutes."
       )
     }
 
-    await genPromise
     if (typeof postGenBananaBalance === "number") {
       emitBananaCreditsUpdated(postGenBananaBalance)
     }
@@ -1107,39 +1112,55 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
   }, [])
 
   async function handleGenerate() {
+    if (submittingRef.current) return
+    submittingRef.current = true
+    setSubmitting(true)
     setError("")
     setGenerationErrorKind("error")
     setCreditGate(null)
+    const failValidation = (message: string) => {
+      setError(message)
+      submittingRef.current = false
+      setSubmitting(false)
+    }
+
     if (!isSignedIn) {
       openSignIn()
+      submittingRef.current = false
+      setSubmitting(false)
       return
     }
-    if (!videoTitle.trim()) return setError("Enter a name for this video.")
-    if (!script.trim()) return setError("Enter a script.")
-    if (voiceKind === "upload" && !voiceSampleUrl) return setError("Upload a voice sample first.")
-    if (!voiceReady) return setError("Select a voice.")
+    if (!videoTitle.trim()) return failValidation("Enter a name for this video.")
+    if (!script.trim()) return failValidation("Enter a script.")
+    if (voiceKind === "upload" && !voiceSampleUrl) return failValidation("Upload a voice sample first.")
+    if (!voiceReady) return failValidation("Select a voice.")
     if (voiceKind === "preset" && selectedPreset?.status !== "active") {
-      return setError("This preset is coming soon. Please choose an active preset.")
+      return failValidation("This preset is coming soon. Please choose an active preset.")
     }
-    if (!consent) return setError("You must acknowledge the consent checkbox.")
-    if (!headshotImageUrl) return setError("Upload a headshot photo.")
+    if (!consent) return failValidation("You must acknowledge the consent checkbox.")
+    if (!headshotImageUrl) return failValidation("Upload a headshot photo.")
     if (voiceKind === "preset" && ttsAvail && !ttsAvail.elevenlabs) {
-      return setError(
+      return failValidation(
         "Preset voices require ElevenLabs. Add the ElevenLabs API key or use a soundboard with Replicate."
       )
     }
     if (voiceKind === "preset" && ttsAvail?.elevenlabsPresetVoicesReady === false) {
-      return setError(
+      return failValidation(
         "Preset video voices need every VOICE_PRESET_*_PROVIDER_ID set in Vercel (see your .env.example). Add those env vars or use a soundboard / upload flow instead."
       )
     }
     if (voiceKind === "upload" && ttsAvail && !ttsAvail.elevenlabs) {
-      return setError(
+      return failValidation(
         "Uploaded voice requires ElevenLabs. Add the ElevenLabs API key or use a soundboard voice."
       )
     }
 
     try {
+      setStage("generating")
+      setProgressStep("Preparing your video…")
+      setProgressPct(null)
+      setProgressDetail(null)
+
       const sharedFields = {
         title: videoTitle.trim(),
         script: script.trim(),
@@ -1149,7 +1170,9 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
         captionsEnabled,
         consentAcknowledged: true as const,
         ...(selectedHeadshotPresetId ? { headshotPresetId: selectedHeadshotPresetId } : {}),
-        ...(draftManifestId ? { replaceDraftId: draftManifestId } : {}),
+        ...(draftManifestIdRef.current
+          ? { replaceDraftId: draftManifestIdRef.current }
+          : {}),
       }
 
       const createBody =
@@ -1174,12 +1197,63 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
                 : {}),
             }
 
-      const createRes = await fetch("/api/video", {
+      let createRes = await fetch("/api/video", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(createBody),
       })
-      const created = await createRes.json()
+      let created = await createRes.json()
+      if (!createRes.ok && createRes.status === 409 && draftManifestIdRef.current) {
+        const replaceId = draftManifestIdRef.current
+        const existingRes = await fetch(`/api/video/${encodeURIComponent(replaceId)}`)
+        if (existingRes.ok) {
+          const existing = (await existingRes.json()) as {
+            id?: string
+            status?: VideoManifest["status"]
+          }
+          const existingId = String(existing.id ?? replaceId)
+          if (existing.status === "processing") {
+            setDraftManifestId(existingId)
+            draftManifestIdRef.current = existingId
+            await runGenerationPipeline(existingId)
+            return
+          }
+          if (existing.status === "complete") {
+            clearPendingGeneration()
+            router.push(`/app/video/${existingId}`)
+            return
+          }
+          if (existing.status === "failed") {
+            setDraftManifestId(existingId)
+            draftManifestIdRef.current = existingId
+            const cost = videoGenerationCostBananaCredits(script.length)
+            const entRes = await fetch("/api/billing/entitlement")
+            if (entRes.ok) {
+              const ent = (await entRes.json()) as { bananaCreditsBalance?: number }
+              const balance =
+                typeof ent.bananaCreditsBalance === "number" ? ent.bananaCreditsBalance : 0
+              if (balance < cost) {
+                setStage("form")
+                openCreditGate(existingId, balance, cost)
+                return
+              }
+            }
+            await runGenerationPipeline(existingId)
+            return
+          }
+        }
+        // Draft was already submitted — create a fresh video instead of failing.
+        setDraftManifestId(null)
+        draftManifestIdRef.current = null
+        router.replace("/app/video/new", { scroll: false })
+        const { replaceDraftId: _drop, ...freshBody } = createBody
+        createRes = await fetch("/api/video", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(freshBody),
+        })
+        created = await createRes.json()
+      }
       if (!createRes.ok) throw new Error(created.error ?? "Failed to create video")
 
       const createdId = String(created.id)
@@ -1192,6 +1266,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
         const balance =
           typeof ent.bananaCreditsBalance === "number" ? ent.bananaCreditsBalance : 0
         if (balance < cost) {
+          setStage("form")
           openCreditGate(createdId, balance, cost)
           return
         }
@@ -1207,6 +1282,9 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
         setGenerationErrorKind("error")
       }
       setStage("form")
+    } finally {
+      submittingRef.current = false
+      setSubmitting(false)
     }
   }
 
@@ -1271,8 +1349,9 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
     step1HeadshotReady && voiceReady && !voiceUploadBusy
   const step2Ready = Boolean(videoTitle.trim()) && Boolean(script.trim())
   const canGenerate =
-    isSignedIn === false ||
-    (!noVoicesAtAll && step1Ready && step2Ready && consent)
+    !submitting &&
+    (isSignedIn === false ||
+      (!noVoicesAtAll && step1Ready && step2Ready && consent))
 
   function goToWizardStep(step: WizardStep, options?: { step1Phase?: "headshot" | "voice" }) {
     setError("")
@@ -2150,6 +2229,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
             : step2Ready
         }
         canGenerate={canGenerate}
+        submitting={submitting}
         creditCost={videoExportBananaCredits}
         nextLabel={
           wizardStep === 1
