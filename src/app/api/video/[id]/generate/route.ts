@@ -168,7 +168,7 @@ export async function POST(
       audioBytes = buffer
     }
 
-    const captionsEnabled = manifest.captionsEnabled !== false
+    const captionsEnabled = manifest.captionsEnabled === true
     let captions = [] as VideoManifest["captions"]
     let talkingVideoUrl: string | undefined
     const isMock = process.env.NEXT_PUBLIC_MOCK_MODE === "true"

@@ -209,7 +209,7 @@ export async function PUT(req: Request) {
         ? parsed.data.headshotPresetId ?? undefined
         : existing?.headshotPresetId,
     talkingMode,
-    captionsEnabled: parsed.data.captionsEnabled ?? existing?.captionsEnabled ?? true,
+    captionsEnabled: parsed.data.captionsEnabled ?? existing?.captionsEnabled ?? false,
     captions: [],
     status: "draft",
     isPublic: true,

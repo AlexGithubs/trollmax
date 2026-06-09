@@ -126,7 +126,7 @@ export default async function ManageVideoPage({
           </p>
           <p>
             Captions:{" "}
-            <span className="text-foreground">{manifest.captionsEnabled === false ? "Off" : "On"}</span>
+            <span className="text-foreground">{manifest.captionsEnabled === true ? "On" : "Off"}</span>
           </p>
         </div>
       </details>

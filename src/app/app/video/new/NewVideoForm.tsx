@@ -360,7 +360,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
   const [headshotUploading, setHeadshotUploading] = useState(false)
   /** Shown while headshot is busy (checking face vs uploading). */
   const [headshotBusyLabel, setHeadshotBusyLabel] = useState<string | null>(null)
-  const [captionsEnabled, setCaptionsEnabled] = useState(true)
+  const [captionsEnabled, setCaptionsEnabled] = useState(false)
   const [consent, setConsent] = useState(false)
   const [wizardStep, setWizardStep] = useState<WizardStep>(1)
   const [step1Phase, setStep1Phase] = useState<"headshot" | "voice">("headshot")
@@ -396,7 +396,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
     headshotName: "",
     selectedHeadshotPresetId: null,
     backgroundVideoId: "minecraft",
-    captionsEnabled: true,
+    captionsEnabled: false,
     consent: false,
   })
 
@@ -552,7 +552,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
         setHeadshotName("")
       }
       setBackgroundVideoId(formBackgroundFromManifest(manifest))
-      setCaptionsEnabled(manifest.captionsEnabled !== false)
+      setCaptionsEnabled(manifest.captionsEnabled === true)
       setConsent(manifest.consentAcknowledged)
       setDraftReady(true)
     })

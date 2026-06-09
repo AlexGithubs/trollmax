@@ -79,7 +79,7 @@ export async function POST(req: Request) {
   const titleInput = parsed.data.title?.trim() ?? ""
   const fallbackFromScript = script.trim().slice(0, 60) || "Untitled video"
   const title = (titleInput.length > 0 ? titleInput : fallbackFromScript).slice(0, 100)
-  const captionsEnabled = parsed.data.captionsEnabled ?? true
+  const captionsEnabled = parsed.data.captionsEnabled ?? false
   const origin = new URL(req.url).origin
 
   if (!isAllowedUserUploadedAssetUrl(headshotImageUrl, origin)) {

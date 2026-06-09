@@ -140,7 +140,7 @@ export const TOUR_STEPS: TourStep[] = [
     targetSelector: '[data-tour="video-captions"]',
     title: "Captions",
     content:
-      "Auto-transcribes your script and burns captions in. Boosts watch time — leave it on unless you have a reason not to.",
+      "Optional — turn on to auto-transcribe your script and burn single-line captions timed to your narration.",
     placement: "top",
     spotlightPadding: 6,
   },

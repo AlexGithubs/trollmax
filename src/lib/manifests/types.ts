@@ -83,7 +83,7 @@ export interface VideoManifest extends BaseManifest {
   wizardStep?: 1 | 2 | 3
   /** Layout for combining D-ID talking head + background video */
   talkingMode: "full" | "half"
-  /** Whether to burn captions into the rendered video (default true). */
+  /** Whether to burn captions into the rendered video (default false). */
   captionsEnabled?: boolean
   captions: Caption[]
   jobId?: string

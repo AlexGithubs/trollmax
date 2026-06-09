@@ -1,10 +1,10 @@
 import type { TranscriptWord } from "@/lib/audio/match-phrases"
 import type { Caption } from "@/lib/manifests/types"
 
-/** Max words per on-screen caption chunk (keeps lines short for 1080px burn-in). */
-const MAX_WORDS_PER_CHUNK = 3
-/** Soft character cap per chunk before splitting further. */
-const MAX_CHARS_PER_CHUNK = 22
+/** Max words per on-screen caption (one line at a time). */
+const MAX_WORDS_PER_CHUNK = 2
+/** Character cap per caption line before starting the next one. */
+const MAX_CHARS_PER_CHUNK = 16
 
 function splitScriptIntoChunks(scriptWords: string[]): string[] {
   const chunks: string[] = []

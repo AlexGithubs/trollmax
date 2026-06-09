@@ -271,36 +271,10 @@ def _resolve_background_clip(background_asset: Optional[str]) -> Optional[str]:
 _CAPTION_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 _CAPTION_FONTSIZE = 76
 _CAPTION_BORDERW = 6
-_CAPTION_LINE_SPACING = 10
-_CAPTION_MAX_LINE_CHARS = 18
-_CAPTION_MAX_LINES = 2
 
 
 def _caption_display_text(text: str) -> str:
-    """Lowercase + wrap so drawtext stays inside the 1080px frame."""
-    words = text.strip().lower().split()
-    if not words:
-        return ""
-
-    lines: list[str] = []
-    current: list[str] = []
-    current_len = 0
-    for word in words:
-        extra = len(word) + (1 if current else 0)
-        if current and current_len + extra > _CAPTION_MAX_LINE_CHARS:
-            lines.append(" ".join(current))
-            current = [word]
-            current_len = len(word)
-        else:
-            current.append(word)
-            current_len += extra
-        if len(lines) >= _CAPTION_MAX_LINES:
-            break
-
-    if len(lines) < _CAPTION_MAX_LINES and current:
-        lines.append(" ".join(current))
-
-    return "\n".join(lines[:_CAPTION_MAX_LINES])
+    return text.strip().lower()
 
 
 def _write_caption_text_files(tmpdir: str, captions: list[Caption]) -> list[str]:
@@ -324,7 +298,6 @@ def _drawtext(textfile_path: str, start_s: float, end_s: float, *, y_expr: str) 
         f":borderw={_CAPTION_BORDERW}"
         f":bordercolor=black"
         f":shadowcolor=black:shadowx=2:shadowy=2"
-        f":line_spacing={_CAPTION_LINE_SPACING}"
         f":fix_bounds=1"
         f":x=(w-text_w)/2"
         f":y={y_expr}"

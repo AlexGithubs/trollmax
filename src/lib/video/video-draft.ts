@@ -32,7 +32,7 @@ export function hasVideoDraftContent(body: VideoDraftUpsertBody): boolean {
       body.consentAcknowledged ||
       body.talkingMode === "half" ||
       (body.backgroundVideoId && body.backgroundVideoId !== "minecraft") ||
-      body.captionsEnabled === false
+      body.captionsEnabled === true
   )
 }
 
