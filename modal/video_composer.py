@@ -9,8 +9,8 @@ Talking-head (when talkingVideoUrl is set — HeyGen or D-ID):
   - talkingMode half: top 960px talking head, bottom 960px gameplay or solid color.
 
 Backgrounds (half bottom, or legacy compose without D-ID):
-  - asset:minecraft     => bundled gameplay clip in modal/assets/minecraft-source.mp4
-  - asset:subway-surfers => bundled gameplay clip in modal/assets/subway-source.mp4
+  - asset:{category}:{variant} => modal/assets/{category}/clip-{variant}.mp4
+  - asset:{category} (legacy)  => clip-1 for that category
   - fallback to solid color if no supported background asset is provided.
 
 Deploy:
@@ -42,13 +42,9 @@ image = (
     modal.Image.debian_slim()
     .apt_install("ffmpeg", "fonts-dejavu-core")
     .pip_install("fastapi", "pydantic", "httpx")
-    .add_local_file(
-        local_path=Path(__file__).parent / "assets" / "minecraft-source.mp4",
-        remote_path="/root/assets/minecraft-source.mp4",
-    )
-    .add_local_file(
-        local_path=Path(__file__).parent / "assets" / "subway-source.mp4",
-        remote_path="/root/assets/subway-source.mp4",
+    .add_local_dir(
+        local_path=Path(__file__).parent / "assets",
+        remote_path="/root/assets",
     )
 )
 
@@ -56,6 +52,9 @@ image = (
 BG_COLORS: dict[str, str] = {
     "minecraft": "0x2d5a1b",
     "subway-surfers": "0xe8721a",
+    "gta-ramp": "0x3d5a80",
+    "satisfying": "0x9b59b6",
+    "roblox": "0xe74c3c",
     "default": "0x111111",
 }
 
@@ -260,10 +259,18 @@ async def compose_video(
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def _resolve_background_clip(background_asset: Optional[str]) -> Optional[str]:
-    if background_asset == "asset:minecraft":
-        return "/root/assets/minecraft-source.mp4"
-    if background_asset == "asset:subway-surfers":
-        return "/root/assets/subway-source.mp4"
+    if not background_asset or not background_asset.startswith("asset:"):
+        return None
+    parts = background_asset.split(":")
+    if len(parts) == 2:
+        # Legacy: asset:minecraft → clip-1
+        category = parts[1]
+        path = f"/root/assets/{category}/clip-1.mp4"
+        return path if os.path.isfile(path) else None
+    if len(parts) == 3:
+        category, variant = parts[1], parts[2]
+        path = f"/root/assets/{category}/clip-{variant}.mp4"
+        return path if os.path.isfile(path) else None
     return None
 
 
@@ -347,9 +354,10 @@ def _build_talking_half_filter(captions: list[Caption], paths: list[str]) -> str
         "scale=1080:960:force_original_aspect_ratio=increase,"
         "crop=1080:960,setsar=1[top]"
     )
+    # Bottom half is 1080×960 (9:8). Scale to fill, center-crop — matches preview object-cover.
     bottom = (
         "[1:v]fps=24,scale=1080:960:force_original_aspect_ratio=increase,"
-        "crop=1080:960,setsar=1[bottom]"
+        "crop=1080:960:(iw-1080)/2:(ih-960)/2,setsar=1[bottom]"
     )
     stacked = "[top][bottom]vstack=inputs=2[bg]"
     if not captions:

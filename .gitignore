@@ -39,6 +39,12 @@ yarn-error.log*
 # local dev asset storage (used by LocalFileStore in place of Vercel Blob)
 /.dev-assets
 
+# user-downloaded full-length background source videos (processed into modal/assets)
+/manual-background-sources
+
+# temp downloads / ffmpeg scratch (never commit)
+/.tmp
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

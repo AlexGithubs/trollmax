@@ -11,6 +11,8 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "prepare-headshots": "npx tsx scripts/prepare-headshot-presets.ts",
+    "prepare-backgrounds": "node scripts/prepare-background-clips.mjs",
+    "prepare-background-previews": "node scripts/prepare-background-clips.mjs --previews-only",
     "test:e2e": "playwright test",
     "test:e2e:prod": "playwright test tests/production.spec.ts"
   },

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" role="img" aria-label="Roblox parkour">
+  <rect width="80" height="80" fill="#87ceeb"/>
+  <rect x="8" y="52" width="20" height="12" fill="#48bb78"/>
+  <rect x="8" y="48" width="20" height="4" fill="#38a169"/>
+  <rect x="32" y="40" width="16" height="10" fill="#ed8936"/>
+  <rect x="32" y="36" width="16" height="4" fill="#dd6b20"/>
+  <rect x="52" y="28" width="14" height="10" fill="#4299e1"/>
+  <rect x="52" y="24" width="14" height="4" fill="#3182ce"/>
+  <rect x="24" y="32" width="6" height="14" fill="#e53e3e"/>
+  <rect x="22" y="30" width="10" height="4" fill="#c53030"/>
+</svg>

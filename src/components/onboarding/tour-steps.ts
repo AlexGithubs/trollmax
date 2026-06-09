@@ -130,7 +130,7 @@ export const TOUR_STEPS: TourStep[] = [
     targetSelector: '[data-tour="video-background"]',
     title: "Background",
     content:
-      "The clip that plays behind you in split-layout mode. Minecraft and Subway Surfers are the go-to brainrot picks.",
+      "The gameplay clip under your character in split layout — Minecraft, Subway Surfers, GTA ramps, satisfying ASMR, or Roblox parkour. Tap Preview on any card to watch before you generate.",
     placement: "top",
     spotlightPadding: 8,
   },

@@ -221,8 +221,8 @@ function loadImageElement(src: string): Promise<HTMLImageElement> {
   })
 }
 
+import { BackgroundClipPicker } from "@/components/video/BackgroundClipPicker"
 import {
-  BACKGROUND_OPTIONS,
   backgroundVideoIdForManifest,
   formatBackgroundForDisplay,
 } from "@/lib/video/backgrounds"
@@ -2059,29 +2059,10 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
             )}
           </div>
           {talkingMode === "half" ? (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              {BACKGROUND_OPTIONS.map((bg) => (
-                <button
-                  key={bg.id}
-                  type="button"
-                  onClick={() => setBackgroundVideoId(bg.id)}
-                  className={[
-                    "rounded-xl border-2 p-3 text-left transition-colors sm:p-4",
-                    backgroundVideoId === bg.id
-                      ? "border-primary bg-primary/5"
-                      : "border-border/40 hover:border-border/80",
-                  ].join(" ")}
-                >
-                  <img
-                    src={bg.thumbSrc}
-                    alt=""
-                    className="mb-2 h-14 w-full rounded-lg border border-border/40 object-cover object-center"
-                  />
-                  <p className="text-sm font-medium">{bg.label}</p>
-                  <p className="text-xs text-muted-foreground">{bg.description}</p>
-                </button>
-              ))}
-            </div>
+            <BackgroundClipPicker
+              value={backgroundVideoId}
+              onChange={setBackgroundVideoId}
+            />
           ) : (
             <p className="rounded-lg border border-border/40 bg-secondary/10 px-3 py-2.5 text-xs text-muted-foreground">
               Full-screen layout has no background clip — your character takes up the whole frame.

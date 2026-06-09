@@ -299,7 +299,7 @@ export async function POST(
       // Modal fetches this only when audioBytes is unset (public or non-Vercel URLs).
       audioUrl: audioBytes ? undefined : audioUrl,
       ...(audioBytes ? { audioBytes } : {}),
-      backgroundVideoUrl: getBackgroundAsset(manifest.backgroundVideoId),
+      backgroundVideoUrl: getBackgroundAsset(manifest.backgroundVideoId, id),
       captions,
       outputFormat: "mp4" as const,
       resolution: "1080x1920" as const,
