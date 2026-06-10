@@ -23,8 +23,8 @@ export type ProductKind = "video" | "soundboard"
 const POSTHOG_KEY = process.env.NEXT_PUBLIC_POSTHOG_KEY
 const POSTHOG_HOST =
   process.env.NEXT_PUBLIC_POSTHOG_HOST?.trim() || "https://us.i.posthog.com"
-const POSTHOG_API_HOST =
-  process.env.NODE_ENV === "production" ? "/ingest" : POSTHOG_HOST
+/** Same-origin proxy — works in dev + prod and satisfies Clerk CSP (`connect-src 'self'`). */
+const POSTHOG_API_HOST = "/ingest"
 
 let initialized = false
 
@@ -63,6 +63,7 @@ export function setAnalyticsConsent(accepted: boolean) {
   if (!initPostHog()) return
   if (accepted) {
     posthog.opt_in_capturing()
+    posthog.capture("$pageview", { $current_url: window.location.href })
   } else {
     posthog.opt_out_capturing()
   }
