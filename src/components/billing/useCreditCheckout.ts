@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from "react"
 import type { CreditPackId } from "@/lib/billing/credit-packs"
+import { ANALYTICS_EVENTS, track } from "@/lib/analytics"
 import { savePendingGeneration, type PendingGeneration } from "@/lib/client/pending-generation"
 
 type StartCheckoutArgs = {
@@ -17,6 +18,10 @@ export function useCreditCheckout() {
   const startCheckout = useCallback(async ({ packId, successPath, pending }: StartCheckoutArgs) => {
     setLoading(true)
     setError(null)
+    track(ANALYTICS_EVENTS.checkoutStarted, {
+      pack_id: packId,
+      from_pending_generation: Boolean(pending),
+    })
     try {
       if (pending) {
         savePendingGeneration({

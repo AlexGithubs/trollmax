@@ -3,6 +3,7 @@
 import Link from "next/link"
 import { useState } from "react"
 import { useAuth, SignInButton } from "@clerk/nextjs"
+import { ANALYTICS_EVENTS, track } from "@/lib/analytics"
 import { AppUserButton } from "@/components/layout/AppUserButton"
 import { Button } from "@/components/ui/button"
 import { Menu, X, Zap } from "lucide-react"
@@ -43,7 +44,14 @@ export function SiteHeader() {
                   <Button variant="ghost" size="sm">Sign in</Button>
                 </SignInButton>
                 <SignInButton mode="modal">
-                  <Button size="sm">Get started</Button>
+                  <Button
+                    size="sm"
+                    onClick={() =>
+                      track(ANALYTICS_EVENTS.landingCtaClick, { cta: "header_get_started" })
+                    }
+                  >
+                    Get started
+                  </Button>
                 </SignInButton>
               </>
             )}
@@ -52,7 +60,14 @@ export function SiteHeader() {
           <div className="flex items-center gap-2 sm:hidden">
             {!isSignedIn && (
               <SignInButton mode="modal">
-                <Button size="sm">Get started</Button>
+                <Button
+                  size="sm"
+                  onClick={() =>
+                    track(ANALYTICS_EVENTS.landingCtaClick, { cta: "header_get_started_mobile" })
+                  }
+                >
+                  Get started
+                </Button>
               </SignInButton>
             )}
             {isSignedIn && <AppUserButton />}

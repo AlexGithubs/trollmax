@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import Link from "next/link"
+import { TrackedCtaLink } from "@/components/analytics/TrackedCtaLink"
 import { Mic2, Pause, Play, Smartphone, Volume2, VolumeX } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -235,7 +235,9 @@ export function LandingInteractiveDemos() {
 
           <div className="mt-8 flex justify-center sm:justify-start">
             <Button asChild className="w-full sm:w-auto">
-              <Link href="/app/video">Generate a video</Link>
+              <TrackedCtaLink href="/app/video/new" cta="demo_generate_video">
+                Generate a video
+              </TrackedCtaLink>
             </Button>
           </div>
         </div>
@@ -271,7 +273,9 @@ export function LandingInteractiveDemos() {
           </BrowserChrome>
 
           <Button asChild className="mt-8 w-full sm:w-auto">
-            <Link href="/app">Build your soundboard</Link>
+            <TrackedCtaLink href="/app/soundboard/new" cta="demo_build_soundboard">
+              Build your soundboard
+            </TrackedCtaLink>
           </Button>
         </div>
       </section>

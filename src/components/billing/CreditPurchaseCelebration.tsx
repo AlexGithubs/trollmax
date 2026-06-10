@@ -16,6 +16,7 @@ import {
   pollUntilCredits,
 } from "@/lib/client/resume-generation"
 import { X } from "lucide-react"
+import { ANALYTICS_EVENTS, track } from "@/lib/analytics"
 
 function pendingContinueLabel(pending: PendingGeneration): string {
   return pending.product === "video" ? "Continue your video" : "Continue your soundboard"
@@ -38,8 +39,13 @@ function CelebrationInner() {
     if (searchParams.get("credit_purchase") !== "success") return
     handledRef.current = true
 
+    const pack = searchParams.get("pack")
     const creditsRaw = searchParams.get("credits_added")
     const credits = creditsRaw ? Number(creditsRaw) : null
+    track(ANALYTICS_EVENTS.purchase, {
+      pack: pack ?? undefined,
+      credits_added: typeof credits === "number" && Number.isFinite(credits) ? credits : undefined,
+    })
     if (typeof credits === "number" && Number.isFinite(credits)) {
       setCreditsAdded(credits)
     }

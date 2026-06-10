@@ -41,6 +41,8 @@ import {
   type PendingGenerationResumeDetail,
 } from "@/lib/client/resume-generation"
 import { cn } from "@/lib/utils"
+import { ANALYTICS_EVENTS, track } from "@/lib/analytics"
+import { useTrackFormStarted } from "@/lib/analytics/use-form-started"
 
 const SOUNDBOARD_RETURN_PATH = "/app/soundboard/new"
 
@@ -93,6 +95,7 @@ async function deleteSampleOnServer(url: string) {
 }
 
 export default function NewSoundboardPage() {
+  useTrackFormStarted("soundboard")
   const router = useRouter()
   const { isSignedIn } = useUser()
   const { openSignIn } = useClerk()
@@ -357,6 +360,11 @@ export default function NewSoundboardPage() {
   const requiresExpansion = generationCost > 1
 
   const openCreditGate = useCallback((manifestId: string, balance: number, required: number) => {
+    track(ANALYTICS_EVENTS.creditGateShown, {
+      product: "soundboard",
+      balance,
+      required,
+    })
     setCreditGate({ manifestId, balance, required })
     setStage("credit_gate")
   }, [])
@@ -426,6 +434,10 @@ export default function NewSoundboardPage() {
           if (statusJson.lastError) throw new Error(statusJson.lastError)
           if (statusJson.status === "complete") {
             completed = true
+            track(ANALYTICS_EVENTS.generateSuccess, {
+              product: "soundboard",
+              manifest_id: createdId,
+            })
             break
           }
           if (statusJson.status === "failed") throw new Error(statusJson.lastError ?? "Generation failed")
@@ -468,6 +480,7 @@ export default function NewSoundboardPage() {
   }, [generationCost])
 
   async function handleGenerate() {
+    track(ANALYTICS_EVENTS.generateClicked, { product: "soundboard" })
     setError("")
     setCreditGate(null)
     if (!isSignedIn) {
@@ -553,6 +566,7 @@ export default function NewSoundboardPage() {
       }
       await runGenerationPipeline(createdId, generationCost)
     } catch (err) {
+      track(ANALYTICS_EVENTS.generateFailed, { product: "soundboard" })
       setError(err instanceof Error ? err.message : "Something went wrong")
       setStage(voiceMode === "preset" ? "idle" : "uploaded")
     }

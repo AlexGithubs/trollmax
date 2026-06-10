@@ -3,6 +3,26 @@ import { withSentryConfig } from "@sentry/nextjs"
 
 const isProd = process.env.NODE_ENV === "production"
 
+function posthogProxyRewrites() {
+  const apiHost =
+    process.env.NEXT_PUBLIC_POSTHOG_HOST?.trim().replace(/\/$/, "") ||
+    "https://us.i.posthog.com"
+  const assetsHost = apiHost.includes("eu.i.posthog")
+    ? "https://eu-assets.i.posthog.com"
+    : "https://us-assets.i.posthog.com"
+
+  return [
+    {
+      source: "/ingest/static/:path*",
+      destination: `${assetsHost}/static/:path*`,
+    },
+    {
+      source: "/ingest/:path*",
+      destination: `${apiHost}/:path*`,
+    },
+  ]
+}
+
 const securityHeaders = [
   { key: "X-DNS-Prefetch-Control", value: "on" },
   { key: "X-Content-Type-Options", value: "nosniff" },
@@ -26,6 +46,10 @@ const nextConfig: NextConfig = {
   // Clerk uses package subpath exports / #imports that fail when webpack bundles the server graph.
   // Native/binary tooling: keep external so Next does not bundle `.node` / ffmpeg incorrectly.
   serverExternalPackages: ["@clerk/backend", "sharp", "fluent-ffmpeg", "ffmpeg-static"],
+  skipTrailingSlashRedirect: true,
+  async rewrites() {
+    return posthogProxyRewrites()
+  },
   async headers() {
     return [
       {

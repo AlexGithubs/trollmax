@@ -50,6 +50,8 @@ import {
   type HeadshotPreset,
 } from "@/lib/headshot-presets/catalog"
 import { cn } from "@/lib/utils"
+import { ANALYTICS_EVENTS, track } from "@/lib/analytics"
+import { useTrackFormStarted } from "@/lib/analytics/use-form-started"
 import { MoreOptions } from "@/components/video/MoreOptions"
 import { SCRIPT_TEMPLATES } from "@/lib/video/script-templates"
 import { VideoWizardStepper, type WizardStep } from "./VideoWizardStepper"
@@ -271,6 +273,7 @@ interface Props {
 }
 
 export function NewVideoForm({ boards, categories, presets }: Props) {
+  useTrackFormStarted("video")
   const router = useRouter()
   const searchParams = useSearchParams()
   const { isSignedIn } = useUser()
@@ -984,6 +987,11 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
 
   const openCreditGate = useCallback(
     (manifestId: string, balance: number, required: number) => {
+      track(ANALYTICS_EVENTS.creditGateShown, {
+        product: "video",
+        balance,
+        required,
+      })
       setDraftManifestId(manifestId)
       draftManifestIdRef.current = manifestId
       setCreditGate({ manifestId, balance, required })
@@ -1069,6 +1077,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
         }
         if (statusJson.status === "complete") {
           completed = true
+          track(ANALYTICS_EVENTS.generateSuccess, { product: "video", manifest_id: createdId })
           break
         }
         if (statusJson.status === "failed") {
@@ -1116,6 +1125,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
   }, [])
 
   async function handleGenerate() {
+    track(ANALYTICS_EVENTS.generateClicked, { product: "video" })
     if (submittingRef.current) return
     submittingRef.current = true
     setSubmitting(true)
@@ -1281,9 +1291,14 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
         const failure = err as GenerationFailure
         setError(failure.message)
         setGenerationErrorKind(failure.kind)
+        track(ANALYTICS_EVENTS.generateFailed, {
+          product: "video",
+          error_kind: failure.kind,
+        })
       } else {
         setError(err instanceof Error ? err.message : "Something went wrong")
         setGenerationErrorKind("error")
+        track(ANALYTICS_EVENTS.generateFailed, { product: "video" })
       }
       setStage("form")
     } finally {

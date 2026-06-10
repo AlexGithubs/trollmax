@@ -1,4 +1,4 @@
-import Link from "next/link"
+import { TrackedCtaLink } from "@/components/analytics/TrackedCtaLink"
 import { type LucideIcon } from "lucide-react"
 import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -79,7 +79,9 @@ export function ProductCard({
 
       <CardFooter className="px-4 sm:px-6">
         <Button asChild className="w-full">
-          <Link href={ctaHref}>{ctaLabel}</Link>
+          <TrackedCtaLink href={ctaHref} cta={ctaLabel}>
+            {ctaLabel}
+          </TrackedCtaLink>
         </Button>
       </CardFooter>
     </Card>

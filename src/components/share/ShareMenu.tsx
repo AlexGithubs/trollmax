@@ -15,6 +15,7 @@ import {
   Twitter,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { ANALYTICS_EVENTS, track } from "@/lib/analytics"
 
 async function copyToClipboard(text: string): Promise<boolean> {
   try {
@@ -80,11 +81,19 @@ export function ShareMenu({
     return () => document.removeEventListener("mousedown", handle)
   }, [open])
 
+  const trackShare = useCallback(
+    (method: string) => {
+      track(ANALYTICS_EVENTS.shareClicked, { kind, method })
+    },
+    [kind]
+  )
+
   const onCopy = useCallback(
     async (which: "link" | "message" | "instagram", text: string) => {
       setFeedback(null)
       const ok = await copyToClipboard(text)
       if (ok) {
+        trackShare(`copy_${which}`)
         setCopied(which)
         setTimeout(() => setCopied(null), 2000)
         return
@@ -92,7 +101,7 @@ export function ShareMenu({
       window.prompt("Copy this text:", text)
       setFeedback("Copy blocked by your browser — select the text above.")
     },
-    []
+    [trackShare]
   )
 
   const canNativeShare =
@@ -107,12 +116,13 @@ export function ShareMenu({
         text: fullMessage,
         url: shareUrl,
       })
+      trackShare("native")
       setOpen(false)
     } catch (e) {
       if (e instanceof Error && e.name === "AbortError") return
       setFeedback("Sharing isn’t available here — try Copy link or an app below.")
     }
-  }, [fullMessage, shareUrl])
+  }, [fullMessage, shareUrl, trackShare])
 
   const encodedUrl = encodeURIComponent(shareUrl)
   const encodedMessage = encodeURIComponent(fullMessage)
@@ -125,6 +135,9 @@ export function ShareMenu({
         size="sm"
         className="gap-1.5"
         onClick={() => {
+          if (!open) {
+            track(ANALYTICS_EVENTS.shareClicked, { kind, method: "open_menu" })
+          }
           setOpen((v) => !v)
           setFeedback(null)
         }}
@@ -215,11 +228,10 @@ export function ShareMenu({
               variant="ghost"
               size="sm"
               className="h-9 justify-start gap-2 font-normal"
-              onClick={() =>
-                openIntent(
-                  `https://twitter.com/intent/tweet?text=${encodedMessage}`
-                )
-              }
+              onClick={() => {
+                trackShare("twitter")
+                openIntent(`https://twitter.com/intent/tweet?text=${encodedMessage}`)
+              }}
             >
               <Twitter className="h-4 w-4 shrink-0 opacity-80" />
               Post on X
@@ -230,11 +242,10 @@ export function ShareMenu({
               variant="ghost"
               size="sm"
               className="h-9 justify-start gap-2 font-normal"
-              onClick={() =>
-                openIntent(
-                  `https://www.facebook.com/sharer/sharer.php?u=${encodedUrl}`
-                )
-              }
+              onClick={() => {
+                trackShare("facebook")
+                openIntent(`https://www.facebook.com/sharer/sharer.php?u=${encodedUrl}`)
+              }}
             >
               <ExternalLink className="h-4 w-4 shrink-0 opacity-80" />
               Facebook
@@ -245,9 +256,10 @@ export function ShareMenu({
               variant="ghost"
               size="sm"
               className="h-9 justify-start gap-2 font-normal"
-              onClick={() =>
+              onClick={() => {
+                trackShare("whatsapp")
                 openIntent(`https://wa.me/?text=${encodedMessage}`)
-              }
+              }}
             >
               <MessageSquare className="h-4 w-4 shrink-0 opacity-80" />
               WhatsApp
@@ -258,9 +270,10 @@ export function ShareMenu({
               variant="ghost"
               size="sm"
               className="h-9 justify-start gap-2 font-normal"
-              onClick={() =>
+              onClick={() => {
+                trackShare("sms")
                 openIntent(`sms:?body=${encodedMessage}`)
-              }
+              }}
             >
               <MessageSquare className="h-4 w-4 shrink-0 opacity-80" />
               Messages (SMS)
@@ -271,11 +284,12 @@ export function ShareMenu({
               variant="ghost"
               size="sm"
               className="h-9 justify-start gap-2 font-normal"
-              onClick={() =>
+              onClick={() => {
+                trackShare("email")
                 openIntent(
                   `mailto:?subject=${encodeURIComponent("Check this out on Trollmax")}&body=${encodedMessage}`
                 )
-              }
+              }}
             >
               <Mail className="h-4 w-4 shrink-0 opacity-80" />
               Email
@@ -286,11 +300,12 @@ export function ShareMenu({
               variant="ghost"
               size="sm"
               className="h-9 justify-start gap-2 font-normal"
-              onClick={() =>
+              onClick={() => {
+                trackShare("reddit")
                 openIntent(
                   `https://www.reddit.com/submit?url=${encodedUrl}&title=${encodeURIComponent("Check out what I made on Trollmax")}`
                 )
-              }
+              }}
             >
               <ExternalLink className="h-4 w-4 shrink-0 opacity-80" />
               Reddit

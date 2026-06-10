@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next"
 import { Geist, Geist_Mono } from "next/font/google"
 import { ClerkProvider } from "@clerk/nextjs"
+import { AnalyticsProvider } from "@/components/analytics/AnalyticsProvider"
 import { clerkAppearance } from "@/lib/clerk-appearance"
 import { getMetadataBase } from "@/lib/site-url"
 import "./globals.css"
@@ -52,7 +53,7 @@ export default function RootLayout({
           className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen bg-background text-foreground`}
           suppressHydrationWarning
         >
-          {children}
+          <AnalyticsProvider>{children}</AnalyticsProvider>
         </body>
       </html>
     </ClerkProvider>

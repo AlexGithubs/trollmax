@@ -1,5 +1,6 @@
 import Link from "next/link"
 import { Mic2, Sparkles, Video, Zap } from "lucide-react"
+import { TrackedCtaLink } from "@/components/analytics/TrackedCtaLink"
 import { ProductCard } from "./ProductCard"
 import { ConsentBanner } from "./ConsentBanner"
 import { LandingInteractiveDemos } from "./LandingInteractiveDemos"
@@ -64,7 +65,9 @@ export function HeroSection() {
 
             <div className="mt-8 flex w-full max-w-md flex-col gap-3 sm:max-w-none sm:flex-row sm:justify-center">
               <Button asChild size="lg" className="h-12 w-full px-8 text-base shadow-lg shadow-primary/20 sm:min-w-[11rem] sm:w-auto">
-                <Link href="/app/video/new">Make a video</Link>
+                <TrackedCtaLink href="/app/video/new" cta="hero_make_video">
+                  Make a video
+                </TrackedCtaLink>
               </Button>
               <Button
                 asChild
@@ -72,7 +75,9 @@ export function HeroSection() {
                 variant="outline"
                 className="h-12 w-full border-primary/35 bg-background/50 px-8 text-base backdrop-blur-sm hover:bg-primary/10 sm:min-w-[11rem] sm:w-auto"
               >
-                <Link href="/app/soundboard/new">Build a soundboard</Link>
+                <TrackedCtaLink href="/app/soundboard/new" cta="hero_build_soundboard">
+                  Build a soundboard
+                </TrackedCtaLink>
               </Button>
             </div>
             <p className="mt-4 max-w-md text-xs text-muted-foreground sm:max-w-lg">
