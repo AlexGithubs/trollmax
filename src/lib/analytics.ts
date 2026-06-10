@@ -37,12 +37,21 @@ function applyStoredConsent() {
   }
 }
 
+/** Keep PostHog opt-in aligned with our consent banner (they can desync). */
+function ensureCaptureReady(): boolean {
+  if (!hasAnalyticsConsent()) return false
+  if (posthog.has_opted_out_capturing()) {
+    posthog.opt_in_capturing()
+  }
+  return true
+}
+
 export function initPostHog() {
   if (initialized || typeof window === "undefined" || !POSTHOG_KEY) return false
   posthog.init(POSTHOG_KEY, {
     api_host: POSTHOG_API_HOST,
     ui_host: POSTHOG_HOST,
-    person_profiles: "identified_only",
+    person_profiles: "always",
     opt_out_capturing_by_default: true,
     autocapture: true,
     capture_pageview: false,
@@ -63,7 +72,11 @@ export function setAnalyticsConsent(accepted: boolean) {
   if (!initPostHog()) return
   if (accepted) {
     posthog.opt_in_capturing()
-    posthog.capture("$pageview", { $current_url: window.location.href })
+    posthog.capture(
+      "$pageview",
+      { $current_url: window.location.href },
+      { send_instantly: true }
+    )
   } else {
     posthog.opt_out_capturing()
   }
@@ -81,17 +94,17 @@ export function isAnalyticsConfigured(): boolean {
 }
 
 export function track(event: AnalyticsEvent, properties?: Record<string, unknown>) {
-  if (!initPostHog() || posthog.has_opted_out_capturing()) return
-  posthog.capture(event, properties)
+  if (!initPostHog() || !ensureCaptureReady()) return
+  posthog.capture(event, properties, { send_instantly: true })
 }
 
 export function capturePageview(url: string) {
-  if (!initPostHog() || posthog.has_opted_out_capturing()) return
-  posthog.capture("$pageview", { $current_url: url })
+  if (!initPostHog() || !ensureCaptureReady()) return
+  posthog.capture("$pageview", { $current_url: url }, { send_instantly: true })
 }
 
 export function identifyUser(userId: string, properties?: Record<string, unknown>) {
-  if (!initPostHog() || posthog.has_opted_out_capturing()) return
+  if (!initPostHog() || !ensureCaptureReady()) return
   posthog.identify(userId, properties)
 }
 

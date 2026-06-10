@@ -8,6 +8,7 @@ import { Video, Plus, Share2 } from "lucide-react"
 import type { VideoManifest } from "@/lib/manifests/types"
 import { formatVideoListSubtitle } from "@/lib/video/backgrounds"
 import { DeleteVideoButton } from "@/components/video/DeleteVideoButton"
+import { TrackedShareLink } from "@/components/analytics/TrackedShareLink"
 import { VIDEO_NEW_HREF, videoEditHref } from "@/lib/client/video-draft"
 
 export const metadata = { title: "Videos — TROLLMAX" }
@@ -117,10 +118,10 @@ export default async function VideoListPage() {
                     )}
                     {video.status === "complete" && (
                       <Button asChild variant="outline" size="sm" className="h-11 flex-1 text-xs">
-                        <Link href={`/v/${video.id}`} target="_blank">
+                        <TrackedShareLink href={`/v/${video.id}`} kind="video" target="_blank">
                           <Share2 className="mr-1 h-3 w-3" />
                           Share
-                        </Link>
+                        </TrackedShareLink>
                       </Button>
                     )}
                   </>

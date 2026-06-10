@@ -12,6 +12,7 @@ import {
   resolveSoundboardStatus,
 } from "@/lib/manifests/status-badge"
 import { DeleteBoardButton } from "@/components/soundboard/DeleteBoardButton"
+import { TrackedShareLink } from "@/components/analytics/TrackedShareLink"
 
 export const metadata = { title: "Soundboards — TROLLMAX" }
 
@@ -148,10 +149,10 @@ export default async function SoundboardListPage() {
                   </Button>
                   {status === "complete" && (
                     <Button asChild variant="outline" size="sm" className="h-11 flex-1 text-xs">
-                      <Link href={`/s/${board.id}`} target="_blank">
+                      <TrackedShareLink href={`/s/${board.id}`} kind="soundboard" target="_blank">
                         <Share2 className="mr-1 h-3 w-3" />
                         Share
-                      </Link>
+                      </TrackedShareLink>
                     </Button>
                   )}
                 </>
