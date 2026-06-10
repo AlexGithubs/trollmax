@@ -47,24 +47,26 @@ function ensureCaptureReady(): boolean {
 }
 
 export function initPostHog() {
-  if (initialized || typeof window === "undefined" || !POSTHOG_KEY) return false
-  posthog.init(POSTHOG_KEY, {
-    api_host: POSTHOG_API_HOST,
-    ui_host: POSTHOG_HOST,
-    person_profiles: "always",
-    opt_out_capturing_by_default: true,
-    autocapture: true,
-    capture_pageview: false,
-    capture_pageleave: true,
-    capture_performance: true,
-    disable_session_recording: false,
-    session_recording: {
-      maskAllInputs: true,
-      maskTextSelector: "[data-ph-mask]",
-    },
-  })
+  if (typeof window === "undefined" || !POSTHOG_KEY) return false
+  if (!initialized) {
+    posthog.init(POSTHOG_KEY, {
+      api_host: POSTHOG_API_HOST,
+      ui_host: POSTHOG_HOST,
+      person_profiles: "always",
+      opt_out_capturing_by_default: true,
+      autocapture: true,
+      capture_pageview: false,
+      capture_pageleave: true,
+      capture_performance: true,
+      disable_session_recording: false,
+      session_recording: {
+        maskAllInputs: true,
+        maskTextSelector: "[data-ph-mask]",
+      },
+    })
+    initialized = true
+  }
   applyStoredConsent()
-  initialized = true
   return true
 }
 
