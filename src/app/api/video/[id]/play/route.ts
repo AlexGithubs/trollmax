@@ -4,12 +4,8 @@ import { NextResponse } from "next/server"
 import { currentUser } from "@clerk/nextjs/server"
 import { getManifestStore } from "@/lib/storage"
 import { downloadBlobBuffer } from "@/lib/storage/blob"
+import { safeDownloadFilename } from "@/lib/media/safe-download-filename"
 import type { VideoManifest } from "@/lib/manifests/types"
-
-function safeDownloadFilename(title: string): string {
-  const base = title.replace(/[^\w\s.-]/g, "").trim().slice(0, 80)
-  return base ? `${base}.mp4` : "video.mp4"
-}
 
 function contentDisposition(inline: boolean, title: string): string {
   return inline ? "inline" : `attachment; filename="${safeDownloadFilename(title)}"`
