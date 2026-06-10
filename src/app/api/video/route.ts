@@ -9,17 +9,17 @@ import {
   absoluteUrlForRefAudio,
   getVoicePresetById,
 } from "@/lib/voice-presets/catalog"
-import { canUseTtsTier, getUserEntitlements } from "@/lib/billing/entitlements"
+import { getUserEntitlements } from "@/lib/billing/entitlements"
+import { MAX_VIDEO_SCRIPT_CHARS } from "@/lib/billing/video-generation-cost"
 import { isAllowedUserUploadedAssetUrl } from "@/lib/security/user-media-url"
 import { checkRateLimit } from "@/lib/rate-limit"
 import { backgroundVideoIdForManifest } from "@/lib/video/backgrounds"
-const TtsTierSchema = z.enum(["replicate", "elevenlabs"])
 
 const CreateSchema = z
   .object({
     /** Display name (dashboard, share page). If omitted or empty, falls back to script prefix (legacy). */
     title: z.string().max(100).optional(),
-    script: z.string().min(1).max(2000),
+    script: z.string().min(1).max(MAX_VIDEO_SCRIPT_CHARS),
     backgroundVideoId: z.string().min(1),
     headshotImageUrl: z.string().url(),
     talkingMode: z.enum(["full", "half"]),
@@ -29,7 +29,6 @@ const CreateSchema = z
     voicePresetId: z.string().min(1).optional(),
     soundboardId: z.string().min(1).optional(),
     voiceRefText: z.string().max(1000).optional(),
-    ttsTier: TtsTierSchema.optional(),
     headshotPresetId: z.string().min(1).optional(),
     replaceDraftId: z.string().min(1).optional(),
   })
@@ -94,7 +93,7 @@ export async function POST(req: Request) {
   let voicePresetId: string | undefined
   let soundboardId: string | undefined
   let voiceSampleUrl: string | undefined
-  let ttsTier: TtsTier = (parsed.data.ttsTier as TtsTier | undefined) ?? "elevenlabs"
+  let ttsTier: TtsTier = "elevenlabs"
 
   if (parsed.data.soundboardId) {
     soundboardId = parsed.data.soundboardId.trim()
@@ -106,10 +105,6 @@ export async function POST(req: Request) {
     const board = JSON.parse(raw) as SoundboardManifest
     if (board.ownerId !== user.id) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-    }
-    ttsTier = board.ttsTier ?? (board.voiceId?.startsWith("http") ? "replicate" : "elevenlabs")
-    if (!canUseTtsTier(ttsTier, ent)) {
-      return NextResponse.json({ error: "This TTS tier is not available." }, { status: 403 })
     }
     voiceId = board.voiceId
     voiceSampleUrl = board.voiceSampleUrl
@@ -126,12 +121,6 @@ export async function POST(req: Request) {
         { status: 400 }
       )
     }
-    // Video generation with catalog presets always uses ElevenLabs (not Replicate F5).
-    ttsTier = "elevenlabs"
-    if (!canUseTtsTier(ttsTier, ent)) {
-      return NextResponse.json({ error: "This TTS tier is not available." }, { status: 403 })
-    }
-
     voiceSampleUrl = absoluteUrlForRefAudio(preset.refAudioUrl, origin)
 
     try {
@@ -150,10 +139,6 @@ export async function POST(req: Request) {
     voiceId = parsed.data.voiceId!.trim()
     const rt = parsed.data.voiceRefText?.trim()
     voiceRefText = rt ? rt : undefined
-    ttsTier = parsed.data.ttsTier ?? "elevenlabs"
-    if (!canUseTtsTier(ttsTier, ent)) {
-      return NextResponse.json({ error: "This TTS tier is not available." }, { status: 403 })
-    }
     voiceSampleUrl = voiceId.startsWith("http") ? voiceId : undefined
     if (voiceSampleUrl && !isAllowedUserUploadedAssetUrl(voiceSampleUrl, origin)) {
       return NextResponse.json(

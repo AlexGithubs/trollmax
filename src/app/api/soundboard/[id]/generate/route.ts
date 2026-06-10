@@ -9,7 +9,7 @@ import type { TTSProvider } from "@/lib/providers/types"
 import { checkRateLimit } from "@/lib/rate-limit"
 import { normalizeTextForTTS } from "@/lib/text/tts-normalize"
 import type { SoundboardManifest, SoundClip } from "@/lib/manifests/types"
-import { getUserEntitlements, canUsePresetForTier } from "@/lib/billing/entitlements"
+import { getUserEntitlements } from "@/lib/billing/entitlements"
 import { BASE_MAX_PHRASE_CHARS, BASE_MAX_PHRASES } from "@/lib/billing/config"
 import {
   BANANA_CREDIT_COSTS,
@@ -111,15 +111,6 @@ export async function POST(
     }
 
   const ent = await getUserEntitlements(user.id)
-  if (manifest.voicePresetId && !canUsePresetForTier(manifest.voicePresetId, false)) {
-    return NextResponse.json(
-      {
-        error: "This board uses a preset that is not available right now.",
-        code: "PRESET_LOCKED",
-      },
-      { status: 403 }
-    )
-  }
   if (manifest.phrases.length > ent.maxPhrases) {
     return NextResponse.json(
       { error: `You can use up to ${ent.maxPhrases} phrases per board.` },
@@ -146,7 +137,7 @@ export async function POST(
     (requiresExpansion ? BANANA_CREDIT_COSTS.soundboardExpansion : 0)
 
   genLog(id, "run_start", {
-    ttsTier: manifest.ttsTier ?? "(legacy infer)",
+    ttsTier: manifest.ttsTier ?? "elevenlabs",
     voicePresetId: manifest.voicePresetId ?? null,
     phraseCount: manifest.phrases.length,
     generationCost,

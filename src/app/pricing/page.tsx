@@ -4,7 +4,13 @@ import { SiteHeader } from "@/components/layout/SiteHeader"
 import { SiteFooter } from "@/components/layout/SiteFooter"
 import { Button } from "@/components/ui/button"
 import { currencyIconSrc } from "@/lib/billing/currency-display"
-import { VIDEO_SCRIPT_CHARS_PER_CREDIT_BLOCK } from "@/lib/billing/video-generation-cost"
+import {
+  MAX_VIDEO_SCRIPT_CHARS,
+  VIDEO_SCRIPT_BASE_CHARS,
+  VIDEO_SCRIPT_EXTRA_CHARS_PER_BLOCK,
+  VIDEO_SCRIPT_EXTRA_BLOCK_BANANA_CREDITS,
+  VIDEO_GENERATE_BASE_BANANA_CREDITS,
+} from "@/lib/billing/video-generation-cost"
 import {
   ENTERPRISE_CREDIT_OFFERING,
   FEATURED_CREDIT_PACK_ID,
@@ -176,7 +182,7 @@ export default function PricingPage() {
               How credits are spent
             </h2>
             <p className="mt-4 text-sm leading-relaxed text-muted-foreground md:text-[0.9375rem] md:leading-relaxed">
-              Video: 2{" "}
+              Video: {VIDEO_GENERATE_BASE_BANANA_CREDITS}{" "}
               <Image
                 src={currencyIconSrc()}
                 alt=""
@@ -184,7 +190,7 @@ export default function PricingPage() {
                 height={14}
                 className="inline-block align-text-bottom opacity-90"
               />{" "}
-              for the first {VIDEO_SCRIPT_CHARS_PER_CREDIT_BLOCK} script characters, +1{" "}
+              for the first {VIDEO_SCRIPT_BASE_CHARS} script characters, +{VIDEO_SCRIPT_EXTRA_BLOCK_BANANA_CREDITS}{" "}
               <Image
                 src={currencyIconSrc()}
                 alt=""
@@ -192,7 +198,8 @@ export default function PricingPage() {
                 height={14}
                 className="inline-block align-text-bottom opacity-90"
               />{" "}
-              per {VIDEO_SCRIPT_CHARS_PER_CREDIT_BLOCK} after. Soundboard: 1{" "}
+              per {VIDEO_SCRIPT_EXTRA_CHARS_PER_BLOCK} after (max {MAX_VIDEO_SCRIPT_CHARS} characters).
+              Soundboard: 1{" "}
               <Image
                 src={currencyIconSrc()}
                 alt=""

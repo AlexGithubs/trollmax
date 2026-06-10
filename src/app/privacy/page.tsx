@@ -86,8 +86,9 @@ export default function PrivacyPage() {
             <h2 className="text-lg font-semibold text-foreground">5. Third-party services</h2>
             <p>
               We use Clerk for authentication, Stripe for payments, PostHog for analytics (with
-              your consent), Modal and/or Replicate for GPU inference, and Vercel for hosting and
-              storage. Each has their own privacy policy.
+              your consent), ElevenLabs for voice synthesis, Replicate for optional video captions,
+              Modal for video compositing, and Vercel for hosting and storage. Each has their own
+              privacy policy.
             </p>
           </section>
 

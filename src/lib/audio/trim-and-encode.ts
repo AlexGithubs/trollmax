@@ -1,7 +1,7 @@
 /**
  * Client-side audio preprocessing for voice cloning.
  * Trims leading/trailing silence, mixes to mono, resamples to 22050 Hz,
- * and re-encodes as 16-bit PCM WAV — the format F5-TTS expects.
+ * and re-encodes as 16-bit PCM WAV for voice upload (22050 Hz mono).
  *
  * All processing happens in the browser via Web Audio API. Zero extra API calls.
  */

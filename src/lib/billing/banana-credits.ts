@@ -6,7 +6,7 @@ export { BANANA_CREDIT_COSTS } from "./credit-costs"
 export const STARTING_BANANA_CREDITS = 5
 export const BILLING_ADMIN_TEST_BANANA_CREDITS = 100
 
-/** Legacy KV key; keep for existing user balances. */
+/** Legacy KV key name; stores banana credit balances. */
 const BALANCE_STORAGE_KEY = (userId: string) => `user:${userId}:doinks`
 const ADMIN_SEED_KEY = (userId: string) => `user:${userId}:doinks:admin-seeded`
 
@@ -110,15 +110,6 @@ export async function creditBananaCredits(userId: string, amount: number): Promi
   const next = roundCredits(Math.min(cur + amount, MAX_BANANA_CREDITS_BALANCE))
   await store.set(key, String(next))
   return next
-}
-
-/** @deprecated Prefer {@link tryDebitBananaCredits} for generation flows. */
-export async function spendBananaCredits(userId: string, amount: number): Promise<number> {
-  const r = await tryDebitBananaCredits(userId, amount)
-  if (!r.ok) {
-    throw new Error("INSUFFICIENT_BANANA_CREDITS")
-  }
-  return r.balance
 }
 
 export async function canAffordBananaCredits(userId: string, amount: number): Promise<boolean> {

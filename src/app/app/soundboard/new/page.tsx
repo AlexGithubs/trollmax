@@ -17,7 +17,6 @@ import {
   CheckCircle2,
   Check,
   Sparkles,
-  Lock,
   Info,
 } from "lucide-react"
 import { trimAndEncodeAudio } from "@/lib/audio/trim-and-encode"
@@ -146,13 +145,10 @@ export default function NewSoundboardPage() {
   // Optional ref transcript (improves zero-shot similarity)
   const [voiceRefText, setVoiceRefText] = useState("")
 
-  type TtsTier = "replicate" | "elevenlabs"
   type TtsAvailability = {
-    replicate: boolean
     elevenlabs: boolean
     elevenlabsPresetVoicesReady?: boolean
   }
-  const [ttsTier, setTtsTier] = useState<TtsTier>("elevenlabs")
   const [ttsAvail, setTtsAvail] = useState<TtsAvailability | null>(null)
 
   const [genId, setGenId] = useState<string | null>(null)
@@ -173,17 +169,6 @@ export default function NewSoundboardPage() {
       cancelled = true
     }
   }, [])
-
-  useEffect(() => {
-    if (
-      voiceMode === "preset" &&
-      ttsAvail?.elevenlabsPresetVoicesReady === false &&
-      ttsTier === "elevenlabs" &&
-      ttsAvail.replicate
-    ) {
-      setTtsTier("replicate")
-    }
-  }, [voiceMode, ttsAvail, ttsTier])
 
   useEffect(() => {
     let cancelled = false
@@ -247,10 +232,6 @@ export default function NewSoundboardPage() {
     if (!p || p.status !== "active") return
     setSelectedPresetId(id)
     setSpeakerLabel(p.defaultSpeakerLabel)
-  }
-
-  function presetLockedForTier(p: (typeof presets)[number]) {
-    return false
   }
 
   function onPresetCardInteract(
@@ -466,30 +447,19 @@ export default function NewSoundboardPage() {
     if (voiceMode === "preset" && selectedPreset?.status !== "active") {
       return setError("This preset is coming soon. Please choose an active preset.")
     }
-    const selectedPresetObj = presets.find((x) => x.id === selectedPresetId)
-    if (voiceMode === "preset" && selectedPresetObj && presetLockedForTier(selectedPresetObj)) {
-      return setError("This preset is not available right now.")
-    }
     if (!title.trim()) return setError("Enter a title.")
     if (voiceMode === "upload" && !speakerLabel.trim()) return setError("Enter a speaker name.")
     if (validPhrases.length === 0) return setError("Add at least one phrase.")
     if (!consent) return setError("You must acknowledge the consent checkbox.")
     if (ttsAvail) {
-      const ok =
-        (ttsTier === "replicate" && ttsAvail.replicate) ||
-        (ttsTier === "elevenlabs" && ttsAvail.elevenlabs)
-      if (!ok) {
+      if (!ttsAvail.elevenlabs) {
         return setError(
-          "Selected voice quality is not configured. Pick another tier or add API keys."
+          "Voice synthesis is not configured. Add ELEVENLABS_API_KEY on the server."
         )
       }
-      if (
-        voiceMode === "preset" &&
-        ttsTier === "elevenlabs" &&
-        ttsAvail.elevenlabsPresetVoicesReady === false
-      ) {
+      if (voiceMode === "preset" && ttsAvail.elevenlabsPresetVoicesReady === false) {
         return setError(
-          "Preset voices need ElevenLabs voice IDs on the server. In Vercel, set every VOICE_PRESET_*_PROVIDER_ID from your env template, or use Good (Replicate) for presets until those are configured."
+          "Preset voices need ElevenLabs voice IDs on the server. Set every VOICE_PRESET_*_PROVIDER_ID from your env template."
         )
       }
     }
@@ -500,7 +470,6 @@ export default function NewSoundboardPage() {
           ? {
               title: title.trim(),
               voicePresetId: selectedPresetId!,
-              ttsTier,
               phrases: validPhrases,
               consentAcknowledged: true as const,
               ...(voiceRefText.trim() ? { voiceRefText: voiceRefText.trim() } : {}),
@@ -509,7 +478,6 @@ export default function NewSoundboardPage() {
               title: title.trim(),
               speakerLabel: speakerLabel.trim(),
               voiceSampleUrl: sampleUrl,
-              ttsTier,
               phrases: validPhrases,
               consentAcknowledged: true as const,
               ...(voiceRefText.trim() ? { voiceRefText: voiceRefText.trim() } : {}),
@@ -715,7 +683,6 @@ export default function NewSoundboardPage() {
                   {filteredPresets.map((p) => {
                     const selected = selectedPresetId === p.id
                     const comingSoon = p.status !== "active"
-                    const tierLock = presetLockedForTier(p)
                     return (
                     <button
                       key={p.id}
@@ -728,7 +695,6 @@ export default function NewSoundboardPage() {
                           ? "border-primary bg-primary/5 ring-2 ring-primary/40"
                           : "border-border/50 bg-card/40 hover:border-border",
                         comingSoon ? "opacity-60" : "",
-                        tierLock ? "border-dashed border-muted-foreground/40" : "",
                       ].join(" ")}
                     >
                       <div className="relative mx-auto">
@@ -737,14 +703,9 @@ export default function NewSoundboardPage() {
                           alt=""
                           className="h-14 w-14 rounded-full border border-border/40 bg-secondary/30 object-contain p-2"
                         />
-                        {selected && !tierLock && (
+                        {selected && (
                           <span className="absolute -right-0.5 -top-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-primary-foreground">
                             <Check className="h-3 w-3" strokeWidth={3} />
-                          </span>
-                        )}
-                        {tierLock && (
-                          <span className="absolute -right-0.5 -top-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-muted text-muted-foreground">
-                            <Lock className="h-2.5 w-2.5" />
                           </span>
                         )}
                       </div>
@@ -882,43 +843,6 @@ export default function NewSoundboardPage() {
             className="hidden"
             onChange={handleFileChange}
           />
-
-          <div data-tour="sb-voice-quality" className="space-y-2 rounded-lg border border-border/50 bg-secondary/10 p-3">
-            <p className="text-xs font-medium text-muted-foreground">Voice quality</p>
-            <div className="grid gap-2 sm:grid-cols-2">
-              {(
-                [
-                  { id: "replicate" as const, label: "Good", hint: "Replicate F5" },
-                  { id: "elevenlabs" as const, label: "Great", hint: "ElevenLabs" },
-                ] as const
-              ).map((opt) => {
-                const presetBlocksEl =
-                  voiceMode === "preset" && ttsAvail?.elevenlabsPresetVoicesReady === false
-                const enabled =
-                  !ttsAvail ||
-                  (opt.id === "replicate" && ttsAvail.replicate) ||
-                  (opt.id === "elevenlabs" && ttsAvail.elevenlabs && !presetBlocksEl)
-                return (
-                  <button
-                    key={opt.id}
-                    type="button"
-                    disabled={busy || !enabled}
-                    onClick={() => setTtsTier(opt.id)}
-                    className={[
-                      "rounded-lg border px-2 py-2 text-left text-xs transition-colors",
-                      ttsTier === opt.id
-                        ? "border-primary bg-primary/10 ring-1 ring-primary/30"
-                        : "border-border/50 hover:border-border",
-                      !enabled ? "cursor-not-allowed opacity-40" : "",
-                    ].join(" ")}
-                  >
-                    <span className="block font-semibold">{opt.label}</span>
-                    <span className="text-muted-foreground">{opt.hint}</span>
-                  </button>
-                )
-              })}
-            </div>
-          </div>
 
           {error && stage === "idle" && (
             <p className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
@@ -1091,10 +1015,8 @@ export default function NewSoundboardPage() {
                   </span>
                 </p>
                 <p>
-                  Voice quality:{" "}
-                  <span className="text-foreground">
-                    {ttsTier === "elevenlabs" ? "Great (ElevenLabs)" : "Good (Replicate)"}
-                  </span>
+                  Voice engine:{" "}
+                  <span className="text-foreground">ElevenLabs</span>
                 </p>
                 <p>
                   Speaker:{" "}

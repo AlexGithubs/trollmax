@@ -28,34 +28,13 @@ export async function resolveSoundboardVoiceForGenerate(
     if (!preset) throw new Error("Unknown voice preset")
     if (preset.status !== "active") throw new Error("Preset voice is not active")
 
-    if (tier === "elevenlabs") {
-      return {
-        provider,
-        voiceId: assertActivePresetProviderVoiceId(preset),
-        refText: manifest.voiceRefText?.trim() || preset.refText?.trim() || undefined,
-      }
-    }
-
-    if (tier === "replicate") {
-      return {
-        provider,
-        voiceId: manifest.voiceSampleUrl,
-        refText: manifest.voiceRefText?.trim() || preset.refText?.trim() || undefined,
-      }
-    }
-    throw new Error(`Unsupported tier for preset soundboard generation: ${tier}`)
-  }
-
-  // Custom upload (no preset)
-  if (tier === "replicate") {
     return {
       provider,
-      voiceId: manifest.voiceSampleUrl,
-      refText: manifest.voiceRefText?.trim(),
+      voiceId: assertActivePresetProviderVoiceId(preset),
+      refText: manifest.voiceRefText?.trim() || preset.refText?.trim() || undefined,
     }
   }
 
-  // elevenlabs + upload: IVC once
   let vid = manifest.voiceId.trim()
   if (vid === manifest.voiceSampleUrl.trim()) {
     const cloned = await provider.clone({
@@ -66,6 +45,7 @@ export async function resolveSoundboardVoiceForGenerate(
     const next: SoundboardManifest = {
       ...manifest,
       voiceId: vid,
+      ttsTier: tier,
       updatedAt: new Date().toISOString(),
     }
     await persist(next)
@@ -97,37 +77,18 @@ export async function resolveVideoVoiceForGenerate(
       throw new Error("Video manifest missing voiceSampleUrl for preset (redeploy client).")
     }
 
-    if (tier === "elevenlabs") {
-      return {
-        provider,
-        voiceId: assertActivePresetProviderVoiceId(preset),
-        refText: manifest.voiceRefText?.trim() || preset.refText?.trim() || undefined,
-      }
+    return {
+      provider,
+      voiceId: assertActivePresetProviderVoiceId(preset),
+      refText: manifest.voiceRefText?.trim() || preset.refText?.trim() || undefined,
     }
-    if (tier === "replicate") {
-      return {
-        provider,
-        voiceId: sampleUrl,
-        refText: manifest.voiceRefText?.trim() || preset.refText?.trim() || undefined,
-      }
-    }
-    throw new Error(`Unsupported tier for preset video generation: ${tier}`)
   }
 
-  // Upload / board voice: voiceId + voiceSampleUrl on manifest
   const sampleUrl =
     manifest.voiceSampleUrl?.trim() ||
     (manifest.voiceId.trim().startsWith("http") ? manifest.voiceId.trim() : "")
   if (!sampleUrl) {
     throw new Error("Video manifest missing voiceSampleUrl for custom voice.")
-  }
-
-  if (tier === "replicate") {
-    return {
-      provider,
-      voiceId: sampleUrl,
-      refText: manifest.voiceRefText?.trim(),
-    }
   }
 
   let vid = manifest.voiceId.trim()
@@ -140,6 +101,7 @@ export async function resolveVideoVoiceForGenerate(
     await persist({
       ...manifest,
       voiceId: vid,
+      ttsTier: tier,
       updatedAt: new Date().toISOString(),
     })
   }

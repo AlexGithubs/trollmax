@@ -9,11 +9,8 @@ import {
   absoluteUrlForRefAudio,
   getVoicePresetById,
 } from "@/lib/voice-presets/catalog"
-import type { TtsTier } from "@/lib/manifests/types"
 import {
   getUserEntitlements,
-  canUsePresetForTier,
-  canUseTtsTier,
 } from "@/lib/billing/entitlements"
 import { EXPANDED_MAX_PHRASE_CHARS, EXPANDED_MAX_PHRASES } from "@/lib/billing/config"
 import { isAllowedUserUploadedAssetUrl } from "@/lib/security/user-media-url"
@@ -28,7 +25,6 @@ const CreateSchema = z
     phrases: z.array(z.string()).min(1).max(EXPANDED_MAX_PHRASES),
     consentAcknowledged: z.literal(true),
     voiceRefText: z.string().max(1000).optional(),
-    ttsTier: z.enum(["replicate", "elevenlabs"]).optional(),
   })
   .superRefine((data, ctx) => {
     const hasPreset = Boolean(data.voicePresetId?.trim())
@@ -133,19 +129,10 @@ export async function POST(req: Request) {
   let speakerLabel: string
   let resolvedRefText: string | undefined
   let voicePresetId: string | undefined
-  let ttsTierResolved: TtsTier = "elevenlabs"
+  const ttsTierResolved = "elevenlabs" as const
 
   if (parsed.data.voicePresetId) {
     const presetId = parsed.data.voicePresetId.trim()
-    if (!canUsePresetForTier(presetId, false)) {
-      return NextResponse.json(
-        {
-          error: "This preset is not available right now.",
-          code: "PRESET_LOCKED",
-        },
-        { status: 403 }
-      )
-    }
     const preset = getVoicePresetById(presetId)
     if (!preset) {
       return NextResponse.json({ error: "Unknown voice preset" }, { status: 400 })
@@ -157,37 +144,18 @@ export async function POST(req: Request) {
         { status: 400 }
       )
     }
-    ttsTierResolved = parsed.data.ttsTier ?? "elevenlabs"
-    if (!canUseTtsTier(ttsTierResolved, ent)) {
+    try {
+      voiceId = assertActivePresetProviderVoiceId(preset)
+    } catch (err) {
       return NextResponse.json(
-        { error: "This TTS tier is not available." },
-        { status: 403 }
+        { error: err instanceof Error ? err.message : "Preset voice unavailable" },
+        { status: 500 }
       )
-    }
-
-    if (ttsTierResolved === "elevenlabs") {
-      try {
-        voiceId = assertActivePresetProviderVoiceId(preset)
-      } catch (err) {
-        return NextResponse.json(
-          { error: err instanceof Error ? err.message : "Preset voice unavailable" },
-          { status: 500 }
-        )
-      }
-    } else {
-      voiceId = voiceSampleUrl
     }
     speakerLabel = preset.defaultSpeakerLabel
     resolvedRefText = preset.refText.trim() ? preset.refText : undefined
     voicePresetId = preset.id
   } else {
-    ttsTierResolved = parsed.data.ttsTier ?? "elevenlabs"
-    if (!canUseTtsTier(ttsTierResolved, ent)) {
-      return NextResponse.json(
-        { error: "This TTS tier is not available." },
-        { status: 403 }
-      )
-    }
     voiceSampleUrl = parsed.data.voiceSampleUrl!
     voiceId = voiceSampleUrl
     speakerLabel = parsed.data.speakerLabel!.trim()

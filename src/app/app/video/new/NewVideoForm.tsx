@@ -37,7 +37,13 @@ import {
   currencyIconSrc,
   formatCurrencyCost,
 } from "@/lib/billing/currency-display"
-import { videoGenerationCostBananaCredits } from "@/lib/billing/video-generation-cost"
+import {
+  videoGenerationCostBananaCredits,
+  MAX_VIDEO_SCRIPT_CHARS,
+  VIDEO_SCRIPT_BASE_CHARS,
+  VIDEO_SCRIPT_EXTRA_CHARS_PER_BLOCK,
+  VIDEO_SCRIPT_EXTRA_BLOCK_BANANA_CREDITS,
+} from "@/lib/billing/video-generation-cost"
 import { CreditGateScreen } from "@/components/billing/CreditGateScreen"
 import { clearPendingGeneration } from "@/lib/client/pending-generation"
 import {
@@ -263,7 +269,6 @@ function throwGenerationFailure(message: string, code?: string | null): never {
 type VoiceUploadStage = "idle" | "processing" | "uploading" | "uploaded"
 
 type TtsAvailability = {
-  replicate: boolean
   elevenlabs: boolean
   elevenlabsPresetVoicesReady?: boolean
 }
@@ -1122,7 +1127,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
     if (!headshotImageUrl) return failValidation("Upload a headshot photo.")
     if (voiceKind === "preset" && ttsAvail && !ttsAvail.elevenlabs) {
       return failValidation(
-        "Preset voices require ElevenLabs. Add the ElevenLabs API key or use a soundboard with Replicate."
+        "Voice synthesis requires ElevenLabs. Add ELEVENLABS_API_KEY on the server."
       )
     }
     if (voiceKind === "preset" && ttsAvail?.elevenlabsPresetVoicesReady === false) {
@@ -1132,7 +1137,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
     }
     if (voiceKind === "upload" && ttsAvail && !ttsAvail.elevenlabs) {
       return failValidation(
-        "Uploaded voice requires ElevenLabs. Add the ElevenLabs API key or use a soundboard voice."
+        "Uploaded voice requires ElevenLabs. Add ELEVENLABS_API_KEY on the server."
       )
     }
 
@@ -1161,13 +1166,11 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
           ? {
               ...sharedFields,
               voicePresetId: selectedPresetId!,
-              ttsTier: "elevenlabs" as const,
             }
           : voiceKind === "upload"
           ? {
               ...sharedFields,
               voiceId: voiceSampleUrl,
-              ttsTier: "elevenlabs" as const,
               ...(voiceUploadRefText.trim() ? { voiceRefText: voiceUploadRefText.trim() } : {}),
             }
           : {
@@ -1767,8 +1770,9 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
               </div>
               <MoreOptions className="hidden sm:block">
                 <p>
-                  Preset voices use <span className="font-medium text-foreground">ElevenLabs</span>. Use{" "}
-                  <span className="text-foreground">My soundboards</span> for Replicate F5.
+                  Preset voices are synthesized with{" "}
+                  <span className="font-medium text-foreground">ElevenLabs</span>. You can also use a
+                  cloned soundboard or upload your own sample below.
                 </p>
               </MoreOptions>
             </div>
@@ -1994,12 +1998,12 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
                 value={script}
                 onChange={(e) => setScript(e.target.value)}
                 placeholder="Write what you want the AI to say in your video…"
-                maxLength={2000}
+                maxLength={MAX_VIDEO_SCRIPT_CHARS}
                 rows={5}
                 className="min-h-[120px] w-full rounded-md border border-border/60 bg-secondary/20 px-3 py-2 text-base outline-none focus:border-primary/60 resize-y sm:min-h-[200px] sm:text-sm"
               />
               <span className="absolute bottom-2 right-3 text-xs text-muted-foreground">
-                {script.length}/2000
+                {script.length}/{MAX_VIDEO_SCRIPT_CHARS}
               </span>
             </div>
           </div>
@@ -2007,8 +2011,10 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
           <MoreOptions>
             <p>Video name is shown on your dashboard and share links — it is not read aloud.</p>
             <p className="flex flex-wrap items-center gap-1.5">
-              Base rate includes the first 500 characters; each additional 500 (or part) adds 1 banana
-              credit. Estimated cost for this script:{" "}
+              Base rate includes the first {VIDEO_SCRIPT_BASE_CHARS} characters; each additional{" "}
+              {VIDEO_SCRIPT_EXTRA_CHARS_PER_BLOCK} (or part) adds{" "}
+              {VIDEO_SCRIPT_EXTRA_BLOCK_BANANA_CREDITS} banana credits per{" "}
+              {VIDEO_SCRIPT_EXTRA_CHARS_PER_BLOCK} after. Estimated cost for this script:{" "}
               <span className="inline-flex items-center gap-1 text-foreground/90">
                 {formatCurrencyCost(videoExportBananaCredits)}
                 <NextImage

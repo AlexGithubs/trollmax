@@ -2,7 +2,7 @@
  * Operator / admin Clerk user IDs (comma-separated).
  *
  * **Primary:** `TROLLMAX_ADMIN_USER_IDS` — one list for:
- * - Higher banana credit floor (see banana-credits / doinks)
+ * - Higher banana credit floor (see banana-credits)
  * - Relaxed per-hour API rate limits (upload / generate / create)
  * - In-app billing preview (free/pro overrides)
  *

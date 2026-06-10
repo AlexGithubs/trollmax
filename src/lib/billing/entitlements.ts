@@ -6,7 +6,6 @@ import {
   EXPANDED_MAX_PHRASE_CHARS,
   EXPANDED_MAX_PHRASES,
 } from "./config"
-import type { TtsTier } from "@/lib/manifests/types"
 import { getManifestStore } from "@/lib/storage"
 import { getBananaCreditsBalance } from "./banana-credits"
 
@@ -42,13 +41,4 @@ export async function getUserEntitlements(
     baseMaxPhraseChars: BASE_MAX_PHRASE_CHARS,
     bananaCreditsBalance,
   }
-}
-
-export function canUsePresetForTier(_presetId: string, _isPro: boolean): boolean {
-  return true
-}
-
-/** Future: gate premium tiers for add-on pricing. All tiers allowed for now. */
-export function canUseTtsTier(_tier: TtsTier, _ent: UserEntitlements): boolean {
-  return true
 }

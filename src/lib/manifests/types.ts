@@ -14,8 +14,8 @@ export interface SoundClip {
   createdAt: string
 }
 
-/** TTS backend: Replicate F5 (good), ElevenLabs (great / presets). */
-export type TtsTier = "replicate" | "elevenlabs"
+/** TTS backend — ElevenLabs presets and instant voice clone. */
+export type TtsTier = "elevenlabs"
 
 export interface BaseManifest {
   id: string
@@ -32,7 +32,7 @@ export interface SoundboardManifest extends BaseManifest {
   voiceId: string
   voiceSampleUrl: string
   speakerLabel: string
-  /** Which TTS stack to use (default inferred from legacy manifests). */
+  /** Always ElevenLabs; field kept for manifest compatibility. */
   ttsTier?: TtsTier
   /** Set when the board was created from a server preset */
   voicePresetId?: string
@@ -62,11 +62,11 @@ export interface VideoManifest extends BaseManifest {
   title: string
   script: string
   voiceId: string
-  /** Preset reference audio URL (set at create when using voicePresetId) for F5. */
+  /** Preset reference audio URL (set at create when using voicePresetId). */
   voiceSampleUrl?: string
-  /** Which TTS stack to use (default inferred from legacy manifests). */
+  /** Always ElevenLabs; field kept for manifest compatibility. */
   ttsTier?: TtsTier
-  /** Transcript of reference audio when using F5-TTS zero-shot (improves quality) */
+  /** Optional transcript of reference audio (improves ElevenLabs cloning/TTS quality). */
   voiceRefText?: string
   /** Set when video uses a server preset voice */
   voicePresetId?: string
@@ -74,14 +74,13 @@ export interface VideoManifest extends BaseManifest {
   soundboardId?: string
   audioUrl: string
   backgroundVideoId: string
-  /** Stored headshot URL (often Vercel Blob). Server sends bytes to D-ID `POST /images`; not passed as `source_url` raw.
-   * Cleared (set to "") after D-ID generation so the blob can be deleted. */
+  /** Stored headshot URL (Vercel Blob). Uploaded to talking-head provider, then deleted after use. */
   headshotImageUrl: string
   /** Character preset id when the headshot came from the catalog (draft resume). */
   headshotPresetId?: string | null
   /** Wizard step when status is draft (in-progress editor). */
   wizardStep?: 1 | 2 | 3
-  /** Layout for combining D-ID talking head + background video */
+  /** Layout for combining talking head + background video (full or split). */
   talkingMode: "full" | "half"
   /** Whether to burn captions into the rendered video (default false). */
   captionsEnabled?: boolean
@@ -95,7 +94,7 @@ export interface VideoManifest extends BaseManifest {
   progressStep?: string
   /** 0–100 */
   progressPct?: number
-  /** Extra detail (e.g. \"polling D-ID…\"). */
+  /** Extra detail (e.g. \"polling HeyGen…\"). */
   progressDetail?: string
   /** Last error string for UI display. */
   lastError?: string

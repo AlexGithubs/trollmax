@@ -61,7 +61,7 @@ export class ElevenLabsTTSProvider implements TTSProvider {
 
   async clone(_opts: CloneOptions): Promise<CloneResult> {
     throw new Error(
-      "ElevenLabs is used only for preset voices. Set REPLICATE_API_TOKEN or MODAL_XTTS_URL so uploaded samples use the zero-shot pipeline."
+      "Use ElevenLabsIVCTTSProvider for voice cloning — base ElevenLabsTTSProvider is presets-only."
     )
   }
 

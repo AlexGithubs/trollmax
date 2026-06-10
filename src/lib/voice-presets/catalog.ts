@@ -1,6 +1,6 @@
 /**
  * Server-allowlisted preset voices. Active presets resolve ElevenLabs voice IDs from env
- * (see providerVoiceIdEnv). Legacy refAudioUrl/refText apply when using F5-TTS / XTTS.
+ * (see providerVoiceIdEnv). refAudioUrl/refText are optional hints for cloning quality.
  */
 
 import { GenerationConfigError } from "@/lib/generation/errors"

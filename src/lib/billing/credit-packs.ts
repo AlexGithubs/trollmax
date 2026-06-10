@@ -7,7 +7,7 @@ import { formatPackOutputLine } from "./pack-output-estimates"
  *
  * Margin guardrails (indicative — tune from provider bills):
  * - Lowest effective $/credit ≈ Scale pack (~$0.714 at 70 / $49.99).
- * - Minimum video debit: 2 credits → compare to your D-ID + TTS + compose average.
+ * - Minimum video debit: 2 credits (first 250 script chars) → compare to HeyGen + ElevenLabs + compose average.
  * - Stripe Price amounts must match `priceUsd`; credit grants come from this file via price ID.
  */
 

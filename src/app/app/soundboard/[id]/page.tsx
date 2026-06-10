@@ -100,7 +100,7 @@ export default async function ManageSoundboardPage({
           <p>
             Voice quality:{" "}
             <span className="text-foreground">
-              {manifest.ttsTier === "elevenlabs" ? "Great (ElevenLabs)" : "Good (Replicate)"}
+              ElevenLabs
             </span>
           </p>
           <p>

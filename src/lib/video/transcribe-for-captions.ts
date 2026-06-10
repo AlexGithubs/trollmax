@@ -8,7 +8,7 @@ const WHISPER_TIMEOUT_MS = 18_000
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 /**
- * Word-level transcript for captions. Times out quickly so D-ID can run in parallel
+ * Word-level transcript for captions. Times out quickly so talking-head generation can run in parallel
  * without blocking the pipeline; caption builder falls back to script + audio duration.
  */
 export async function transcribeForCaptions(audioUrl: string): Promise<TranscriptWord[]> {

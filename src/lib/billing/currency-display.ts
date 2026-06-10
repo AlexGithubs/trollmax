@@ -1,6 +1,6 @@
 /**
  * User-facing currency: banana credits (golden banana icon).
- * Balances are stored under the legacy Redis key `user:*:doinks`.
+ * Balances are stored in KV under `user:{id}:doinks` (historical key name from pre-rename).
  */
 
 const BANANA_CREDIT_ICON = "/cylinder-credit.png"

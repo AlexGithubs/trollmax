@@ -3,7 +3,10 @@ import { currentUser } from "@clerk/nextjs/server"
 import { getUserEntitlements } from "@/lib/billing/entitlements"
 import { BANANA_CREDIT_COSTS, STARTING_BANANA_CREDITS } from "@/lib/billing/banana-credits"
 import {
-  VIDEO_SCRIPT_CHARS_PER_CREDIT_BLOCK,
+  MAX_VIDEO_SCRIPT_CHARS,
+  VIDEO_SCRIPT_BASE_CHARS,
+  VIDEO_SCRIPT_EXTRA_CHARS_PER_BLOCK,
+  VIDEO_SCRIPT_EXTRA_BLOCK_BANANA_CREDITS,
   VIDEO_GENERATE_BASE_BANANA_CREDITS,
 } from "@/lib/billing/video-generation-cost"
 import { CURRENCY_MODE } from "@/lib/billing/currency-display"
@@ -29,11 +32,14 @@ export async function GET() {
       baseMaxPhraseChars: e.baseMaxPhraseChars,
       bananaCreditsBalance: e.bananaCreditsBalance,
       startingBananaCredits: STARTING_BANANA_CREDITS,
+      maxVideoScriptChars: MAX_VIDEO_SCRIPT_CHARS,
       costs: {
         soundboardGenerate: BANANA_CREDIT_COSTS.soundboardGenerate,
         soundboardExpansion: BANANA_CREDIT_COSTS.soundboardExpansion,
         videoGenerate: BANANA_CREDIT_COSTS.videoGenerate,
-        videoScriptCharsPerCreditBlock: VIDEO_SCRIPT_CHARS_PER_CREDIT_BLOCK,
+        videoScriptBaseChars: VIDEO_SCRIPT_BASE_CHARS,
+        videoScriptExtraCharsPerBlock: VIDEO_SCRIPT_EXTRA_CHARS_PER_BLOCK,
+        videoScriptExtraBlockBananaCredits: VIDEO_SCRIPT_EXTRA_BLOCK_BANANA_CREDITS,
         videoGenerateBaseBananaCredits: VIDEO_GENERATE_BASE_BANANA_CREDITS,
       },
       atSoundboardLimit: e.soundboardCount >= e.maxSoundboards,

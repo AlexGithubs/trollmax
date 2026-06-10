@@ -20,7 +20,7 @@ export interface SynthesizeOptions {
   /** Max 500 chars enforced at API layer */
   text: string
   language?: string
-  /** Optional transcript of the reference audio — improves speaker similarity for F5-TTS */
+  /** Optional transcript of the reference audio — improves speaker similarity */
   refText?: string
 }
 
@@ -35,12 +35,6 @@ export interface TTSProvider {
   synthesize(opts: SynthesizeOptions): Promise<SynthesizeResult>
   /** Required for DMCA compliance — removes voice data from provider */
   deleteVoice(voiceId: string): Promise<void>
-}
-
-// ── Captions Provider ────────────────────────────────────────────────────────
-
-export interface CaptionsProvider {
-  transcribe(audioUrl: string): Promise<Caption[]>
 }
 
 // ── Video Composer ───────────────────────────────────────────────────────────

@@ -9,7 +9,8 @@ import {
   absoluteUrlForRefAudio,
   getVoicePresetById,
 } from "@/lib/voice-presets/catalog"
-import { canUseTtsTier, getUserEntitlements } from "@/lib/billing/entitlements"
+import { getUserEntitlements } from "@/lib/billing/entitlements"
+import { MAX_VIDEO_SCRIPT_CHARS } from "@/lib/billing/video-generation-cost"
 import { isAllowedUserUploadedAssetUrl } from "@/lib/security/user-media-url"
 import { backgroundVideoIdForManifest } from "@/lib/video/backgrounds"
 import { hasVideoDraftContent, videoDraftTitle } from "@/lib/video/video-draft"
@@ -18,7 +19,7 @@ const DraftUpsertSchema = z.object({
   id: z.string().min(1).optional(),
   wizardStep: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional(),
   title: z.string().max(100).optional(),
-  script: z.string().max(2000).optional(),
+  script: z.string().max(MAX_VIDEO_SCRIPT_CHARS).optional(),
   voiceKind: z.enum(["preset", "board", "upload"]).optional(),
   selectedPresetId: z.string().nullable().optional(),
   selectedBoardId: z.string().optional(),
@@ -72,10 +73,9 @@ async function resolveVoiceFields(
         soundboardId: existing?.soundboardId,
       }
     }
-    const ttsTier = board.ttsTier ?? (board.voiceId?.startsWith("http") ? "replicate" : "elevenlabs")
     return {
       voiceId: board.voiceId,
-      ttsTier,
+      ttsTier: "elevenlabs",
       voiceSampleUrl: board.voiceSampleUrl,
       voiceRefText: board.voiceRefText?.trim() || undefined,
       voicePresetId: board.voicePresetId,
@@ -182,9 +182,6 @@ export async function PUT(req: Request) {
   }
 
   const voice = await resolveVoiceFields(parsed.data, origin, user.id, existing)
-  if (voice.ttsTier && !canUseTtsTier(voice.ttsTier, await getUserEntitlements(user.id))) {
-    return NextResponse.json({ error: "This TTS tier is not available." }, { status: 403 })
-  }
 
   const id = existing?.id ?? nanoid(10)
   const manifest: VideoManifest = {

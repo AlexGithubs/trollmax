@@ -139,7 +139,7 @@ export function HeroSection() {
           <ProductCard
             icon={Video}
             title="Brainrot Video Generator"
-            description="Script + headshot + background → 9:16 video: TTS (ElevenLabs or Replicate), D-ID talking head, optional captions from Replicate Whisper, then FFmpeg compositing (Modal)."
+            description="Script + headshot + background → 9:16 video: ElevenLabs TTS, HeyGen talking head, optional captions from Replicate Whisper, then FFmpeg compositing (Modal)."
             features={[
               "Optional on-screen captions timed to your narration (Replicate Whisper)",
               "Backgrounds include Subway Surfers, Minecraft, and more",
@@ -154,7 +154,7 @@ export function HeroSection() {
           <ProductCard
             icon={Mic2}
             title="Voice Cloning Soundboard"
-            description="Pick a preset voice or upload a sample, type your phrases, and generate clips for a shareable board — ElevenLabs for presets, Replicate F5-TTS for custom uploads."
+            description="Pick a preset voice or upload a sample, type your phrases, and generate clips for a shareable board — all voices use ElevenLabs cloning and TTS."
             features={[
               "Uploads: ~10–20s of clear speech works best",
               "You write the phrases — we synthesize each clip with your voice",
