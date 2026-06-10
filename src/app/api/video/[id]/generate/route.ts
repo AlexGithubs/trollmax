@@ -351,6 +351,7 @@ export async function POST(
       progressDetail: null as unknown as undefined,
       lastError: undefined,
       lastErrorCode: undefined,
+      unseenCompletion: true,
       updatedAt: new Date().toISOString(),
     }
     await store.set(`video:${id}`, JSON.stringify(completed))

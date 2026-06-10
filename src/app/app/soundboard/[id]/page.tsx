@@ -13,6 +13,8 @@ import { SoundboardPlayer } from "@/components/soundboard/SoundboardPlayer"
 import { ShareMenu } from "@/components/share/ShareMenu"
 import { SoundboardVideoUpsell } from "@/components/soundboard/SoundboardVideoUpsell"
 import { DeleteBoardButton } from "@/components/soundboard/DeleteBoardButton"
+import { RegenerateSoundboardButton } from "@/components/soundboard/RegenerateSoundboardButton"
+import { ManifestStatusPoller } from "@/components/generation/ManifestStatusPoller"
 import { getSiteBaseUrl } from "@/lib/site-url"
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
@@ -111,7 +113,14 @@ export default async function ManageSoundboardPage({
         </div>
       </details>
 
-      {hasClips ? (
+      {status === "processing" ? (
+        <ManifestStatusPoller
+          product="soundboard"
+          manifestId={id}
+          initialStatus="processing"
+          initialProgressStep={manifest.progressStep}
+        />
+      ) : hasClips ? (
         <>
           <SoundboardPlayer
             clips={manifest.clips}
@@ -119,13 +128,18 @@ export default async function ManageSoundboardPage({
           />
           {videoUpsellHref ? <SoundboardVideoUpsell href={videoUpsellHref} /> : null}
         </>
+      ) : status === "failed" ? (
+        <div className="flex flex-col items-center gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-8 text-center">
+          <p className="text-sm font-medium text-destructive">Generation failed</p>
+          <p className="text-xs text-muted-foreground">
+            {manifest.lastError ?? "Something went wrong. Try generating again."}
+          </p>
+          <RegenerateSoundboardButton soundboardId={id} />
+        </div>
       ) : (
         <div className="rounded-xl border border-border/40 bg-card/30 p-6 text-center text-sm text-muted-foreground">
           No clips yet.{" "}
-          <Link href={`/app/soundboard/${id}/regenerate`} className="text-primary underline">
-            Regenerate
-          </Link>{" "}
-          to generate clips.
+          <RegenerateSoundboardButton soundboardId={id} className="inline" /> to generate clips.
         </div>
       )}
 

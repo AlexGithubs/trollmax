@@ -45,6 +45,16 @@ import {
   type PendingGenerationResumeDetail,
 } from "@/lib/client/resume-generation"
 import {
+  pollUntilGenerationSettled,
+  startGenerationPost,
+} from "@/lib/client/wait-for-generation"
+import { GenerationCloseHint } from "@/components/generation/GenerationCloseHint"
+import {
+  acknowledgeVideoReady,
+  clearActiveGeneratingVideoId,
+  setActiveGeneratingVideoId,
+} from "@/lib/client/active-generation"
+import {
   HEADSHOT_PRESETS,
   headshotPresetImageSrc,
   type HeadshotPreset,
@@ -1008,104 +1018,61 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
     setProgressStep("Starting…")
     setProgressPct(0)
     setProgressDetail(null)
+    setActiveGeneratingVideoId(createdId)
 
-    let genHttpError: GenerationFailure | null = null
-    let postGenBananaBalance: number | undefined
-    const genPromise = fetch(`/api/video/${createdId}/generate`, { method: "POST" })
-      .then(async (r) => {
-        const j = await r.json().catch(() => ({}))
-        if (r.status === 402) {
-          const o = j as {
-            code?: string
-            balance?: number
-            required?: number
-            error?: string
-          }
-          if (o.code === "INSUFFICIENT_BANANA_CREDITS") {
-            openCreditGate(
-              createdId,
-              typeof o.balance === "number" ? o.balance : 0,
-              typeof o.required === "number"
-                ? o.required
-                : videoGenerationCostBananaCredits(script.length)
-            )
-            return null
-          }
-        }
-        if (!r.ok) {
-          const o = j as { error?: string; detail?: string; code?: string }
-          const msg = [o.error, o.detail].filter(Boolean).join(" — ")
-          throwGenerationFailure(msg || "Generation failed", o.code)
-        }
-        const o = j as { id?: string; bananaCreditsBalance?: number }
-        if (typeof o.bananaCreditsBalance === "number") postGenBananaBalance = o.bananaCreditsBalance
-        return o
-      })
-      .catch((e) => {
-        if (e && typeof e === "object" && "message" in e && "kind" in e) {
-          genHttpError = e as GenerationFailure
-          return
-        }
-        genHttpError = {
-          message: e instanceof Error ? e.message : String(e),
-          kind: "error",
-        }
-      })
+    const { promise, getPostError, clearPostError } = startGenerationPost(
+      `/api/video/${createdId}/generate`
+    )
 
-    let completed = false
-    for (let attempt = 0; attempt < 900; attempt++) {
-      if (genHttpError) throw genHttpError
-      const statusRes = await fetch(`/api/video/${createdId}/status`, { method: "GET" })
-      const statusJson = (await statusRes.json().catch(() => null)) as
-        | {
-            status?: string
-            videoUrl?: string | null
-            progressStep?: string | null
-            progressPct?: number | null
-            progressDetail?: string | null
-            lastError?: string | null
-            lastErrorCode?: string | null
-          }
-        | null
-
-      if (statusJson) {
+    const pollResult = await pollUntilGenerationSettled({
+      statusUrl: `/api/video/${createdId}/status`,
+      generatePromise: promise,
+      getPostError,
+      clearPostError,
+      onProgress: (statusJson) => {
         setProgressStep(statusJson.progressStep ?? null)
         setProgressPct(typeof statusJson.progressPct === "number" ? statusJson.progressPct : null)
         setProgressDetail(statusJson.progressDetail ?? null)
-        if (statusJson.lastError) {
-          throwGenerationFailure(statusJson.lastError, statusJson.lastErrorCode)
-        }
-        if (statusJson.status === "complete") {
-          completed = true
-          track(ANALYTICS_EVENTS.generateSuccess, { product: "video", manifest_id: createdId })
-          break
-        }
-        if (statusJson.status === "failed") {
-          throwGenerationFailure(
-            statusJson.lastError ?? "Generation failed",
-            statusJson.lastErrorCode
-          )
-        }
-      }
+      },
+    })
 
-      await new Promise((r) => setTimeout(r, 1000))
+    if (pollResult.outcome === "insufficient_credits") {
+      clearActiveGeneratingVideoId()
+      openCreditGate(
+        createdId,
+        pollResult.insufficientCredits?.balance ?? 0,
+        pollResult.insufficientCredits?.required ?? videoGenerationCostBananaCredits(script.length)
+      )
+      return
     }
 
-    const genResult = await genPromise
-    if (genResult === null) return
+    if (pollResult.outcome === "timeout") {
+      clearActiveGeneratingVideoId()
+      clearPendingGeneration()
+      router.push(`/app/video/${createdId}`)
+      return
+    }
 
-    if (!completed) {
-      if (genHttpError) throw genHttpError
-      throw new Error(
-        "Generation is taking longer than expected. Check your videos list for this item, or try again in a few minutes."
+    if (pollResult.outcome === "failed") {
+      clearActiveGeneratingVideoId()
+      throwGenerationFailure(
+        pollResult.status.lastError ?? "Generation failed",
+        pollResult.status.lastErrorCode
       )
     }
 
-    if (typeof postGenBananaBalance === "number") {
-      emitBananaCreditsUpdated(postGenBananaBalance)
+    track(ANALYTICS_EVENTS.generateSuccess, { product: "video", manifest_id: createdId })
+
+    const balance =
+      pollResult.bananaCreditsBalance ??
+      (await promise.then((r) => (r.kind === "ok" ? r.bananaCreditsBalance : undefined)))
+    if (typeof balance === "number") {
+      emitBananaCreditsUpdated(balance)
     }
     await refreshBananaCreditsFromServer()
     clearPendingGeneration()
+    clearActiveGeneratingVideoId()
+    await acknowledgeVideoReady(createdId)
     await router.refresh()
     setStage("done")
     router.push(`/app/video/${createdId}`)
@@ -1287,6 +1254,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
       }
       await runGenerationPipeline(createdId)
     } catch (err) {
+      clearActiveGeneratingVideoId()
       if (err && typeof err === "object" && "message" in err && "kind" in err) {
         const failure = err as GenerationFailure
         setError(failure.message)
@@ -1329,15 +1297,26 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
   }
 
   if (stage === "generating") {
+    const progressId = draftManifestId
     return (
       <div className="fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto bg-background p-4 sm:p-6">
         <div className="generating-overlay-panel space-y-6">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Generating Video</h1>
             <p className="mt-1 text-sm text-muted-foreground text-balance">
-              Your video is being created. This may take a few minutes — please keep this screen open.
+              Your video is being created. This usually takes a few minutes.
             </p>
           </div>
+          {progressId ? (
+            <GenerationCloseHint
+              product="video"
+              manifestId={progressId}
+              onLeave={() => {
+                clearActiveGeneratingVideoId()
+                router.push(`/app/video/${progressId}`)
+              }}
+            />
+          ) : null}
           <VideoGeneratingCard
             progressStep={progressStep}
             progressPct={progressPct}

@@ -3,6 +3,7 @@ import { AppMobileBottomNav } from "@/components/layout/AppMobileBottomNav"
 import { AppUserButton } from "@/components/layout/AppUserButton"
 import { BananaCreditsClient } from "@/components/billing/BananaCreditsClient"
 import { CreditPurchaseCelebration } from "@/components/billing/CreditPurchaseCelebration"
+import { VideoReadyPrompt } from "@/components/video/VideoReadyPrompt"
 import { OnboardingTour, TourRestartButton } from "@/components/onboarding/OnboardingTour"
 import { SignInMobileButton, SignInSidebarButton } from "@/components/layout/SignInLink"
 import { currentUser } from "@clerk/nextjs/server"
@@ -82,6 +83,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
       <OnboardingTour />
       <CreditPurchaseCelebration />
+      {user ? <VideoReadyPrompt /> : null}
     </div>
   )
 }

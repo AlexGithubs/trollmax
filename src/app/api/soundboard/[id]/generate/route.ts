@@ -371,11 +371,12 @@ export async function POST(
     await creditBananaCredits(user.id, generationCost).catch((refundErr) => {
       console.error("[soundboard/generate] credit refund failed (clips):", refundErr)
     })
+    const clipError = err instanceof Error ? err.message : String(err)
     await updateProgress({
       status: "failed",
       progressStep: "Failed",
       progressPct: 100,
-      lastError: err instanceof Error ? err.message : String(err),
+      lastError: clipError,
     })
     return jsonGenerationErrorResponse("soundboard/generate:clips", err, 500, logCtx(id))
   }
@@ -424,6 +425,8 @@ export async function POST(
       try {
         const cur = JSON.parse(curRaw) as SoundboardManifest
         if (cur.ownerId === user.id) {
+          const failMessage =
+            unexpected instanceof Error ? unexpected.message : String(unexpected)
           await store.set(
             `soundboard:${id}`,
             JSON.stringify({
@@ -431,8 +434,7 @@ export async function POST(
               status: "failed",
               progressStep: "Failed",
               progressPct: 100,
-              lastError:
-                unexpected instanceof Error ? unexpected.message : String(unexpected),
+              lastError: failMessage,
               updatedAt: new Date().toISOString(),
             })
           )

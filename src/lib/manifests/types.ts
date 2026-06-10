@@ -101,6 +101,8 @@ export interface VideoManifest extends BaseManifest {
   lastError?: string
   /** Machine-readable failure code for UI styling (e.g. GENERATION_CAPABILITY_UNAVAILABLE). */
   lastErrorCode?: string
+  /** Set when generation completes while the user may be away — cleared after they view or dismiss. */
+  unseenCompletion?: boolean
 }
 
 export interface TakedownRequest {

@@ -40,6 +40,11 @@ import {
   PENDING_GENERATION_RESUME_EVENT,
   type PendingGenerationResumeDetail,
 } from "@/lib/client/resume-generation"
+import {
+  pollUntilGenerationSettled,
+  startGenerationPost,
+} from "@/lib/client/wait-for-generation"
+import { GenerationCloseHint } from "@/components/generation/GenerationCloseHint"
 import { cn } from "@/lib/utils"
 import { ANALYTICS_EVENTS, track } from "@/lib/analytics"
 import { useTrackFormStarted } from "@/lib/analytics/use-form-started"
@@ -374,88 +379,53 @@ export default function NewSoundboardPage() {
       setCreditGate(null)
       setError("")
       setGenId(createdId)
-
-      let genHttpError: Error | null = null
-      let postGenBananaBalance: number | undefined
-      const genPromise = fetch(`/api/soundboard/${createdId}/generate`, { method: "POST" })
-        .then(async (r) => {
-          const j = await r.json().catch(() => ({}))
-          if (r.status === 402) {
-            const o = j as {
-              code?: string
-              balance?: number
-              required?: number
-            }
-            if (o.code === "INSUFFICIENT_BANANA_CREDITS") {
-              openCreditGate(
-                createdId,
-                typeof o.balance === "number" ? o.balance : 0,
-                typeof o.required === "number" ? o.required : cost
-              )
-              return null
-            }
-          }
-          if (!r.ok) {
-            const o = j as { error?: string; detail?: string }
-            const msg = [o.error, o.detail].filter(Boolean).join(" — ")
-            throw new Error(msg || "Generation failed")
-          }
-          const o = j as { id?: string; bananaCreditsBalance?: number }
-          if (typeof o.bananaCreditsBalance === "number") postGenBananaBalance = o.bananaCreditsBalance
-          return o
-        })
-        .catch((e) => {
-          genHttpError = e instanceof Error ? e : new Error(String(e))
-        })
-
-      const genResult = await genPromise
-      if (genResult === null) return
-
       setStage("generating")
 
-      let completed = false
-      for (let attempt = 0; attempt < 900; attempt++) {
-        if (genHttpError) throw genHttpError
-        const statusRes = await fetch(`/api/soundboard/${createdId}/status`, { method: "GET" })
-        const statusJson = (await statusRes.json().catch(() => null)) as
-          | {
-              status?: string
-              progressStep?: string | null
-              progressPct?: number | null
-              progressDetail?: string | null
-              lastError?: string | null
-            }
-          | null
+      const { promise, getPostError, clearPostError } = startGenerationPost(
+        `/api/soundboard/${createdId}/generate`
+      )
 
-        if (statusJson) {
+      const pollResult = await pollUntilGenerationSettled({
+        statusUrl: `/api/soundboard/${createdId}/status`,
+        generatePromise: promise,
+        getPostError,
+        clearPostError,
+        onProgress: (statusJson) => {
           setProgressStep(statusJson.progressStep ?? null)
           setProgressPct(typeof statusJson.progressPct === "number" ? statusJson.progressPct : null)
           setProgressDetail(statusJson.progressDetail ?? null)
-          if (statusJson.lastError) throw new Error(statusJson.lastError)
-          if (statusJson.status === "complete") {
-            completed = true
-            track(ANALYTICS_EVENTS.generateSuccess, {
-              product: "soundboard",
-              manifest_id: createdId,
-            })
-            break
-          }
-          if (statusJson.status === "failed") throw new Error(statusJson.lastError ?? "Generation failed")
-        }
+        },
+      })
 
-        await new Promise((r) => setTimeout(r, 1000))
-      }
-
-      if (!completed) {
-        void genPromise.catch(() => {})
-        throw new Error(
-          "Generation is taking longer than expected. Check your soundboards list for this board, or try again in a few minutes."
+      if (pollResult.outcome === "insufficient_credits") {
+        openCreditGate(
+          createdId,
+          pollResult.insufficientCredits?.balance ?? 0,
+          pollResult.insufficientCredits?.required ?? cost
         )
+        return
       }
 
-      await genPromise
-      if (typeof postGenBananaBalance === "number") {
-        emitBananaCreditsUpdated(postGenBananaBalance)
+      if (pollResult.outcome === "timeout") {
+        clearPendingGeneration()
+        router.push(`/app/soundboard/${createdId}`)
+        return
+      }
+
+      if (pollResult.outcome === "failed") {
+        throw new Error(pollResult.status.lastError ?? "Generation failed")
+      }
+
+      track(ANALYTICS_EVENTS.generateSuccess, {
+        product: "soundboard",
+        manifest_id: createdId,
+      })
+
+      const balance =
+        pollResult.bananaCreditsBalance ??
+        (await promise.then((r) => (r.kind === "ok" ? r.bananaCreditsBalance : undefined)))
+      if (typeof balance === "number") {
+        emitBananaCreditsUpdated(balance)
       }
       await refreshBananaCreditsFromServer()
       clearPendingGeneration()
@@ -612,6 +582,19 @@ export default function NewSoundboardPage() {
     return (
       <div className="fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto bg-background p-4 sm:p-6">
         <div className="generating-overlay-panel space-y-4">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Generating Soundboard</h1>
+            <p className="mt-1 text-sm text-muted-foreground text-balance">
+              Your clips are being created. This usually takes a minute or two.
+            </p>
+          </div>
+          {genId ? (
+            <GenerationCloseHint
+              product="soundboard"
+              manifestId={genId}
+              onLeave={() => router.push(`/app/soundboard/${genId}`)}
+            />
+          ) : null}
           {error && (
             <p className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-left text-sm text-destructive sm:text-center">
               {error}

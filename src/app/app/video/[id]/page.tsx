@@ -3,12 +3,14 @@ import { currentUser } from "@clerk/nextjs/server"
 import Link from "next/link"
 import { getManifestStore } from "@/lib/storage"
 import { Button } from "@/components/ui/button"
-import { ArrowLeft, Loader2, AlertCircle, Info } from "lucide-react"
+import { ArrowLeft, AlertCircle, Info } from "lucide-react"
 import type { SoundboardManifest, VideoManifest } from "@/lib/manifests/types"
 import { VideoPlayer } from "@/components/video/VideoPlayer"
+import { AckVideoView } from "@/components/video/AckVideoView"
 import { ShareMenu } from "@/components/share/ShareMenu"
 import { VideoDownloadButton } from "@/components/video/VideoDownloadButton"
 import { DeleteVideoButton } from "@/components/video/DeleteVideoButton"
+import { ManifestStatusPoller } from "@/components/generation/ManifestStatusPoller"
 import { formatVideoListSubtitle, formatBackgroundForDisplay } from "@/lib/video/backgrounds"
 import { videoEditHref } from "@/lib/client/video-draft"
 import { getSiteBaseUrl } from "@/lib/site-url"
@@ -132,15 +134,19 @@ export default async function ManageVideoPage({
       </details>
 
       {manifest.status === "complete" && manifest.videoUrl && (
-        <VideoPlayer videoUrl={manifest.videoUrl} videoId={id} />
+        <>
+          <AckVideoView videoId={id} />
+          <VideoPlayer videoUrl={manifest.videoUrl} videoId={id} />
+        </>
       )}
 
       {manifest.status === "processing" && (
-        <div className="flex flex-col items-center gap-3 rounded-xl border border-border/40 bg-card/30 p-10 text-center">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          <p className="text-sm text-muted-foreground">Your video is being generated…</p>
-          <p className="text-xs text-muted-foreground">Refresh the page to check progress.</p>
-        </div>
+        <ManifestStatusPoller
+          product="video"
+          manifestId={id}
+          initialStatus="processing"
+          initialProgressStep={manifest.progressStep}
+        />
       )}
 
       {manifest.status === "failed" && (
