@@ -4,7 +4,10 @@ import { NextResponse } from "next/server"
 import { currentUser } from "@clerk/nextjs/server"
 import { nanoid } from "nanoid"
 import { getManifestStore } from "@/lib/storage"
-import { resolveSoundboardVoiceForGenerate } from "@/lib/tts/resolve-voice-for-generate"
+import {
+  releaseEphemeralSoundboardClone,
+  resolveSoundboardVoiceForGenerate,
+} from "@/lib/tts/resolve-voice-for-generate"
 import type { TTSProvider } from "@/lib/providers/types"
 import { checkRateLimit } from "@/lib/rate-limit"
 import { normalizeTextForTTS } from "@/lib/text/tts-normalize"
@@ -85,6 +88,10 @@ export async function POST(
   const lockKey = `generate_lock:soundboard:${id}`
   let lockHeld = false
   let creditsDebited = 0
+  let voiceId: string | undefined
+  let refTextForSynth: string | undefined
+  let provider: TTSProvider | undefined
+  let manifestSnapshot: SoundboardManifest | undefined
 
   try {
     let manifest: SoundboardManifest
@@ -168,7 +175,7 @@ export async function POST(
     )
   }
 
-  const manifestSnapshot = { ...manifest }
+  manifestSnapshot = { ...manifest }
 
   await updateProgress({
     status: "processing",
@@ -198,10 +205,6 @@ export async function POST(
   const balanceAfterDebit = debit.balance
   genLog(id, "credits_debited", { generationCost, balanceAfterDebit })
   genLog(id, "before_preparing_voice_update")
-
-  let voiceId: string
-  let refTextForSynth: string | undefined
-  let provider: TTSProvider
 
   try {
     await updateProgress({ progressStep: "Preparing voice…", progressPct: 5 })
@@ -237,13 +240,25 @@ export async function POST(
     return jsonGenerationErrorResponse("soundboard/generate:voice", err, 500, logCtx(id))
   }
 
+  if (!provider || !voiceId) {
+    return jsonGenerationErrorResponse(
+      "soundboard/generate:voice",
+      new Error("Voice preparation did not return a provider"),
+      500,
+      logCtx(id)
+    )
+  }
+
+  const ttsProvider = provider
+  const synthVoiceId = voiceId
+
   async function synthesizeWithRetry(
     phraseForSpeech: string,
     retries = 4
   ): Promise<{ audioUrl: string; durationSeconds: number }> {
     try {
-      return await provider.synthesize({
-        voiceId,
+      return await ttsProvider.synthesize({
+        voiceId: synthVoiceId,
         text: phraseForSpeech,
         language: "en",
         ...(refTextForSynth ? { refText: refTextForSynth } : {}),
@@ -359,6 +374,17 @@ export async function POST(
       err instanceof Error ? err.message : err,
       err instanceof Error ? err.stack : ""
     )
+    if (provider && voiceId && manifestSnapshot) {
+      const resetVoiceId = await releaseEphemeralSoundboardClone(
+        provider,
+        manifestSnapshot,
+        voiceId
+      )
+      if (resetVoiceId !== voiceId) {
+        genLog(id, "ephemeral_voice_released", { reason: "clips_failed" })
+        await updateProgress({ voiceId: resetVoiceId })
+      }
+    }
     await creditBananaCredits(user.id, generationCost).catch((refundErr) => {
       console.error("[soundboard/generate] credit refund failed (clips):", refundErr)
     })
@@ -382,9 +408,18 @@ export async function POST(
     }
   }
 
+  const persistedVoiceId = await releaseEphemeralSoundboardClone(
+    ttsProvider,
+    latestBase,
+    synthVoiceId
+  )
+  if (persistedVoiceId !== synthVoiceId) {
+    genLog(id, "ephemeral_voice_released", { reason: "complete" })
+  }
+
   const updated: SoundboardManifest = {
     ...latestBase,
-    voiceId,
+    voiceId: persistedVoiceId,
     clips,
     status: "complete",
     progressStep: "Complete",
@@ -411,6 +446,17 @@ export async function POST(
         console.error("[soundboard/generate] credit refund failed (unexpected):", refundErr)
       })
     }
+    let resetVoiceId: string | undefined
+    if (provider && voiceId && manifestSnapshot) {
+      resetVoiceId = await releaseEphemeralSoundboardClone(
+        provider,
+        manifestSnapshot,
+        voiceId
+      )
+      if (resetVoiceId !== voiceId) {
+        genLog(id, "ephemeral_voice_released", { reason: "unexpected_failure" })
+      }
+    }
     const curRaw = await store.get(`soundboard:${id}`)
     if (curRaw) {
       try {
@@ -418,10 +464,16 @@ export async function POST(
         if (cur.ownerId === user.id) {
           const failMessage =
             unexpected instanceof Error ? unexpected.message : String(unexpected)
+          const resetVoiceIdOnFail =
+            resetVoiceId ??
+            (provider && voiceId && manifestSnapshot
+              ? await releaseEphemeralSoundboardClone(provider, manifestSnapshot, voiceId)
+              : cur.voiceId)
           await store.set(
             `soundboard:${id}`,
             JSON.stringify({
               ...cur,
+              voiceId: resetVoiceIdOnFail,
               status: "failed",
               progressStep: "Failed",
               progressPct: 100,

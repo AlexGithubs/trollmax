@@ -3,7 +3,7 @@ import { currentUser } from "@clerk/nextjs/server"
 import { z } from "zod"
 import { nanoid } from "nanoid"
 import { getManifestStore } from "@/lib/storage"
-import type { SoundboardManifest, TtsTier, VideoManifest } from "@/lib/manifests/types"
+import type { TtsTier, VideoManifest } from "@/lib/manifests/types"
 import {
   assertActivePresetProviderVoiceId,
   absoluteUrlForRefAudio,
@@ -27,7 +27,6 @@ const CreateSchema = z
     consentAcknowledged: z.literal(true),
     voiceId: z.string().min(1).optional(),
     voicePresetId: z.string().min(1).optional(),
-    soundboardId: z.string().min(1).optional(),
     voiceRefText: z.string().max(1000).optional(),
     headshotPresetId: z.string().min(1).optional(),
     replaceDraftId: z.string().min(1).optional(),
@@ -35,12 +34,11 @@ const CreateSchema = z
   .superRefine((data, ctx) => {
     const hasPreset = Boolean(data.voicePresetId?.trim())
     const hasVoice = Boolean(data.voiceId?.trim())
-    const hasBoard = Boolean(data.soundboardId?.trim())
-    const n = [hasPreset, hasVoice, hasBoard].filter(Boolean).length
+    const n = [hasPreset, hasVoice].filter(Boolean).length
     if (n !== 1) {
       ctx.addIssue({
         code: "custom",
-        message: "Provide exactly one of voicePresetId, voiceId, or soundboardId",
+        message: "Provide exactly one of voicePresetId or voiceId",
         path: ["voiceId"],
       })
     }
@@ -91,26 +89,10 @@ export async function POST(req: Request) {
   let voiceId: string
   let voiceRefText: string | undefined
   let voicePresetId: string | undefined
-  let soundboardId: string | undefined
   let voiceSampleUrl: string | undefined
   let ttsTier: TtsTier = "elevenlabs"
 
-  if (parsed.data.soundboardId) {
-    soundboardId = parsed.data.soundboardId.trim()
-    const store = getManifestStore()
-    const raw = await store.get(`soundboard:${soundboardId}`)
-    if (!raw) {
-      return NextResponse.json({ error: "Soundboard not found" }, { status: 404 })
-    }
-    const board = JSON.parse(raw) as SoundboardManifest
-    if (board.ownerId !== user.id) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-    }
-    voiceId = board.voiceId
-    voiceSampleUrl = board.voiceSampleUrl
-    voiceRefText = board.voiceRefText?.trim() || undefined
-    voicePresetId = board.voicePresetId
-  } else if (parsed.data.voicePresetId) {
+  if (parsed.data.voicePresetId) {
     const preset = getVoicePresetById(parsed.data.voicePresetId.trim())
     if (!preset) {
       return NextResponse.json({ error: "Unknown voice preset" }, { status: 400 })
@@ -179,7 +161,6 @@ export async function POST(req: Request) {
     ...(voiceSampleUrl ? { voiceSampleUrl } : {}),
     ...(voiceRefText ? { voiceRefText } : {}),
     ...(voicePresetId ? { voicePresetId } : {}),
-    ...(soundboardId ? { soundboardId } : {}),
     ...(parsed.data.headshotPresetId?.trim()
       ? { headshotPresetId: parsed.data.headshotPresetId.trim() }
       : {}),

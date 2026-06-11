@@ -6,9 +6,8 @@ export type VideoDraftUpsertBody = {
   wizardStep?: WizardStep
   title?: string
   script?: string
-  voiceKind?: "preset" | "board" | "upload"
+  voiceKind?: "preset" | "upload"
   selectedPresetId?: string | null
-  selectedBoardId?: string
   voiceSampleUrl?: string
   voiceUploadRefText?: string
   talkingMode?: "full" | "half"

@@ -4,7 +4,7 @@ import Link from "next/link"
 import { getManifestStore } from "@/lib/storage"
 import { Button } from "@/components/ui/button"
 import { ArrowLeft, AlertCircle, Info } from "lucide-react"
-import type { SoundboardManifest, VideoManifest } from "@/lib/manifests/types"
+import type { VideoManifest } from "@/lib/manifests/types"
 import { VideoPlayer } from "@/components/video/VideoPlayer"
 import { AckVideoView } from "@/components/video/AckVideoView"
 import { ShareMenu } from "@/components/share/ShareMenu"
@@ -47,16 +47,12 @@ export default async function ManageVideoPage({
   const shareUrl = `${baseUrl}/v/${id}`
 
   const badge = STATUS_BADGE[manifest.status]
-  const sourceBoardRaw = manifest.soundboardId
-    ? await store.get(`soundboard:${manifest.soundboardId}`)
-    : null
-  const sourceBoard = sourceBoardRaw ? (JSON.parse(sourceBoardRaw) as SoundboardManifest) : null
   const voiceSourceLabel = manifest.voicePresetId
     ? `Preset (${manifest.voicePresetId})`
-    : sourceBoard
-      ? `Soundboard (${sourceBoard.title})`
-      : /^https?:\/\//i.test(manifest.voiceId)
-        ? "Sample voice"
+    : /^https?:\/\//i.test(manifest.voiceId)
+      ? "Sample voice"
+      : manifest.soundboardId
+        ? "Legacy soundboard voice"
         : "Cloned voice ID"
 
   return (

@@ -70,7 +70,7 @@ export interface VideoManifest extends BaseManifest {
   voiceRefText?: string
   /** Set when video uses a server preset voice */
   voicePresetId?: string
-  /** Set when video voice is sourced from an existing soundboard */
+  /** Legacy — older videos could reference a soundboard for voice; no longer set on create */
   soundboardId?: string
   audioUrl: string
   backgroundVideoId: string

@@ -3,7 +3,7 @@ import { currentUser } from "@clerk/nextjs/server"
 import { z } from "zod"
 import { nanoid } from "nanoid"
 import { getManifestStore } from "@/lib/storage"
-import type { SoundboardManifest, TtsTier, VideoManifest } from "@/lib/manifests/types"
+import type { TtsTier, VideoManifest } from "@/lib/manifests/types"
 import {
   assertActivePresetProviderVoiceId,
   absoluteUrlForRefAudio,
@@ -20,9 +20,8 @@ const DraftUpsertSchema = z.object({
   wizardStep: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional(),
   title: z.string().max(100).optional(),
   script: z.string().max(MAX_VIDEO_SCRIPT_CHARS).optional(),
-  voiceKind: z.enum(["preset", "board", "upload"]).optional(),
+  voiceKind: z.enum(["preset", "upload"]).optional(),
   selectedPresetId: z.string().nullable().optional(),
-  selectedBoardId: z.string().optional(),
   voiceSampleUrl: z.string().optional(),
   voiceUploadRefText: z.string().max(1000).optional(),
   talkingMode: z.enum(["full", "half"]).optional(),
@@ -37,7 +36,6 @@ const DraftUpsertSchema = z.object({
 async function resolveVoiceFields(
   data: z.infer<typeof DraftUpsertSchema>,
   origin: string,
-  userId: string,
   existing?: VideoManifest
 ): Promise<{
   voiceId: string
@@ -45,43 +43,14 @@ async function resolveVoiceFields(
   voiceSampleUrl?: string
   voiceRefText?: string
   voicePresetId?: string
-  soundboardId?: string
 }> {
-  const kind = data.voiceKind ?? (existing?.voicePresetId ? "preset" : existing?.soundboardId ? "board" : existing?.voiceId?.startsWith("http") ? "upload" : "preset")
-
-  if (kind === "board" && data.selectedBoardId?.trim()) {
-    const store = getManifestStore()
-    const raw = await store.get(`soundboard:${data.selectedBoardId.trim()}`)
-    if (!raw) {
-      return {
-        voiceId: existing?.voiceId ?? "",
-        ttsTier: existing?.ttsTier ?? "elevenlabs",
-        voiceSampleUrl: existing?.voiceSampleUrl,
-        voiceRefText: existing?.voiceRefText,
-        voicePresetId: existing?.voicePresetId,
-        soundboardId: existing?.soundboardId,
-      }
-    }
-    const board = JSON.parse(raw) as SoundboardManifest
-    if (board.ownerId !== userId) {
-      return {
-        voiceId: existing?.voiceId ?? "",
-        ttsTier: existing?.ttsTier ?? "elevenlabs",
-        voiceSampleUrl: existing?.voiceSampleUrl,
-        voiceRefText: existing?.voiceRefText,
-        voicePresetId: existing?.voicePresetId,
-        soundboardId: existing?.soundboardId,
-      }
-    }
-    return {
-      voiceId: board.voiceId,
-      ttsTier: "elevenlabs",
-      voiceSampleUrl: board.voiceSampleUrl,
-      voiceRefText: board.voiceRefText?.trim() || undefined,
-      voicePresetId: board.voicePresetId,
-      soundboardId: board.id,
-    }
-  }
+  const kind =
+    data.voiceKind ??
+    (existing?.voicePresetId
+      ? "preset"
+      : existing?.voiceId?.startsWith("http")
+        ? "upload"
+        : "preset")
 
   if (kind === "preset" && data.selectedPresetId?.trim()) {
     const preset = getVoicePresetById(data.selectedPresetId.trim())
@@ -122,7 +91,6 @@ async function resolveVoiceFields(
     voiceSampleUrl: existing?.voiceSampleUrl,
     voiceRefText: existing?.voiceRefText,
     voicePresetId: existing?.voicePresetId,
-    soundboardId: existing?.soundboardId,
   }
 }
 
@@ -181,7 +149,7 @@ export async function PUT(req: Request) {
     }
   }
 
-  const voice = await resolveVoiceFields(parsed.data, origin, user.id, existing)
+  const voice = await resolveVoiceFields(parsed.data, origin, existing)
 
   const id = existing?.id ?? nanoid(10)
   const manifest: VideoManifest = {
@@ -194,7 +162,6 @@ export async function PUT(req: Request) {
     ...(voice.voiceSampleUrl ? { voiceSampleUrl: voice.voiceSampleUrl } : {}),
     ...(voice.voiceRefText ? { voiceRefText: voice.voiceRefText } : {}),
     ...(voice.voicePresetId ? { voicePresetId: voice.voicePresetId } : {}),
-    ...(voice.soundboardId ? { soundboardId: voice.soundboardId } : {}),
     audioUrl: "",
     backgroundVideoId: backgroundVideoIdForManifest(
       talkingMode,

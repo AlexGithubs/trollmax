@@ -11,7 +11,6 @@ import {
 } from "@/lib/manifests/status-badge"
 import { SoundboardPlayer } from "@/components/soundboard/SoundboardPlayer"
 import { ShareMenu } from "@/components/share/ShareMenu"
-import { SoundboardVideoUpsell } from "@/components/soundboard/SoundboardVideoUpsell"
 import { DeleteBoardButton } from "@/components/soundboard/DeleteBoardButton"
 import { RegenerateSoundboardButton } from "@/components/soundboard/RegenerateSoundboardButton"
 import { ManifestStatusPoller } from "@/components/generation/ManifestStatusPoller"
@@ -44,12 +43,6 @@ export default async function ManageSoundboardPage({
   const status = resolveSoundboardStatus(manifest)
   const badge = MANIFEST_STATUS_BADGE[status]
   const hasClips = manifest.clips.length > 0
-  const videoUpsellHref = hasClips
-    ? `/app/video/new?${new URLSearchParams({
-        soundboardId: id,
-        title: `${manifest.title} video`,
-      }).toString()}`
-    : null
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
@@ -126,7 +119,6 @@ export default async function ManageSoundboardPage({
             clips={manifest.clips}
             voicePresetId={manifest.voicePresetId}
           />
-          {videoUpsellHref ? <SoundboardVideoUpsell href={videoUpsellHref} /> : null}
         </>
       ) : status === "failed" ? (
         <div className="flex flex-col items-center gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-8 text-center">

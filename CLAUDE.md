@@ -82,6 +82,7 @@ POST /api/soundboard          → create manifest (draft)
 POST /api/soundboard/:id/generate
   → resolveSoundboardVoiceForGenerate()  // ElevenLabs IVC if upload; preset uses EL voice ID
   → for each phrase (concurrency ≤3): provider.synthesize()
+  → upload IVC only: releaseEphemeralSoundboardClone() — delete EL voice, reset voiceId to sample URL
   → clips uploaded to Blob; manifest status complete
 ```
 

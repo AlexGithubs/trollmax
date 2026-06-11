@@ -25,7 +25,6 @@ import {
   Clock,
 } from "lucide-react"
 import { trimAndEncodeAudio } from "@/lib/audio/trim-and-encode"
-import type { SoundboardManifest } from "@/lib/manifests/types"
 import type {
   VoicePresetPublic,
   VoicePresetCategory,
@@ -114,7 +113,7 @@ function resolveHeadshotDisplayUrl(
   return ""
 }
 
-type VoiceKind = "preset" | "board" | "upload"
+type VoiceKind = "preset" | "upload"
 
 type FormDraftSnapshot = {
   wizardStep: WizardStep
@@ -122,7 +121,6 @@ type FormDraftSnapshot = {
   script: string
   voiceKind: VoiceKind
   selectedPresetId: string | null
-  selectedBoardId: string
   voiceSampleUrl: string
   voiceUploadRefText: string
   talkingMode: "full" | "half"
@@ -145,7 +143,6 @@ function buildServerDraftPayload(
     script: snapshot.script,
     voiceKind: snapshot.voiceKind,
     selectedPresetId: snapshot.selectedPresetId,
-    selectedBoardId: snapshot.selectedBoardId,
     voiceSampleUrl: snapshot.voiceSampleUrl,
     voiceUploadRefText: snapshot.voiceUploadRefText,
     talkingMode: snapshot.talkingMode,
@@ -282,12 +279,11 @@ async function deleteVoiceSampleOnServer(url: string) {
 }
 
 interface Props {
-  boards: SoundboardManifest[]
   categories: VoicePresetCategory[]
   presets: VoicePresetPublic[]
 }
 
-export function NewVideoForm({ boards, categories, presets }: Props) {
+export function NewVideoForm({ categories, presets }: Props) {
   useTrackFormStarted("video")
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -308,13 +304,12 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
   const [videoTitle, setVideoTitle] = useState("")
   const [script, setScript] = useState("")
   const [voiceKind, setVoiceKind] = useState<VoiceKind>(
-    presets.length > 0 ? "preset" : "board"
+    presets.length > 0 ? "preset" : "upload"
   )
   const [categoryFilter, setCategoryFilter] = useState<string>("all")
   const [selectedPresetId, setSelectedPresetId] = useState<string | null>(
     presets[0]?.id ?? null
   )
-  const [selectedBoardId, setSelectedBoardId] = useState(boards[0]?.id ?? "")
   const [ttsAvail, setTtsAvail] = useState<TtsAvailability | null>(null)
 
   // Voice upload state
@@ -329,7 +324,6 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
   const voiceFileInputRef = useRef<HTMLInputElement>(null)
   const [backgroundVideoId, setBackgroundVideoId] = useState("minecraft")
   const selectedPreset = presets.find((p) => p.id === selectedPresetId)
-  const selectedBoard = boards.find((b) => b.id === selectedBoardId)
 
   useEffect(() => {
     fetch("/api/tts-availability")
@@ -337,17 +331,6 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
       .then((j) => setTtsAvail(j as TtsAvailability))
       .catch(() => setTtsAvail(null))
   }, [])
-
-  useEffect(() => {
-    const boardId = searchParams.get("soundboardId")?.trim()
-    if (!boardId || !boards.some((b) => b.id === boardId)) return
-
-    setVoiceKind("board")
-    setSelectedBoardId(boardId)
-
-    const titleParam = searchParams.get("title")?.trim()
-    if (titleParam) setVideoTitle(titleParam.slice(0, 100))
-  }, [searchParams, boards])
 
   const filteredPresets = useMemo(() => {
     if (categoryFilter === "all") return presets
@@ -404,9 +387,8 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
     wizardStep: 1,
     videoTitle: "",
     script: "",
-    voiceKind: presets.length > 0 ? "preset" : "board",
+    voiceKind: presets.length > 0 ? "preset" : "upload",
     selectedPresetId: presets[0]?.id ?? null,
-    selectedBoardId: boards[0]?.id ?? "",
     voiceSampleUrl: "",
     voiceUploadRefText: "",
     talkingMode: "full",
@@ -429,7 +411,6 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
       script,
       voiceKind,
       selectedPresetId,
-      selectedBoardId,
       voiceSampleUrl,
       voiceUploadRefText,
       talkingMode,
@@ -446,7 +427,6 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
     script,
     voiceKind,
     selectedPresetId,
-    selectedBoardId,
     voiceSampleUrl,
     voiceUploadRefText,
     talkingMode,
@@ -498,20 +478,12 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
 
   useEffect(() => {
     const startFresh = searchParams.get("new") === "1"
-    const soundboardId = searchParams.get("soundboardId")?.trim()
     const draftId = searchParams.get("id")?.trim()
 
     if (startFresh) {
       setDraftManifestId(null)
       draftManifestIdRef.current = null
       router.replace("/app/video/new", { scroll: false })
-      setDraftReady(true)
-      return
-    }
-
-    if (soundboardId) {
-      setDraftManifestId(null)
-      draftManifestIdRef.current = null
       setDraftReady(true)
       return
     }
@@ -534,10 +506,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
       setWizardStep(manifest.wizardStep ?? 1)
       setVideoTitle(manifest.title)
       setScript(manifest.script)
-      if (manifest.soundboardId) {
-        setVoiceKind("board")
-        setSelectedBoardId(manifest.soundboardId)
-      } else if (manifest.voicePresetId) {
+      if (manifest.voicePresetId) {
         setVoiceKind("preset")
         setSelectedPresetId(manifest.voicePresetId)
       } else if (manifest.voiceId?.startsWith("http")) {
@@ -599,7 +568,6 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
     script,
     voiceKind,
     selectedPresetId,
-    selectedBoardId,
     voiceSampleUrl,
     voiceUploadRefText,
     talkingMode,
@@ -654,15 +622,12 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
   }, [voiceSamplePreviewUrl])
 
   const canUsePresets = presets.length > 0
-  const canUseBoards = boards.length > 0
 
   const voiceUploadBusy = voiceUploadStage === "processing" || voiceUploadStage === "uploading" || removingVoiceSample
 
   const voiceReady =
     voiceKind === "preset"
       ? Boolean(selectedPresetId && selectedPreset?.status === "active")
-      : voiceKind === "board"
-      ? Boolean(selectedBoardId && selectedBoard)
       : Boolean(voiceSampleUrl)
 
   async function processVoiceFile(file: File) {
@@ -1132,7 +1097,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
     }
     if (voiceKind === "preset" && ttsAvail?.elevenlabsPresetVoicesReady === false) {
       return failValidation(
-        "Preset video voices need every VOICE_PRESET_*_PROVIDER_ID set in Vercel (see your .env.example). Add those env vars or use a soundboard / upload flow instead."
+        "Preset video voices need every VOICE_PRESET_*_PROVIDER_ID set in Vercel (see your .env.example). Add those env vars or upload your own voice sample instead."
       )
     }
     if (voiceKind === "upload" && ttsAvail && !ttsAvail.elevenlabs) {
@@ -1167,18 +1132,10 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
               ...sharedFields,
               voicePresetId: selectedPresetId!,
             }
-          : voiceKind === "upload"
-          ? {
+          : {
               ...sharedFields,
               voiceId: voiceSampleUrl,
               ...(voiceUploadRefText.trim() ? { voiceRefText: voiceUploadRefText.trim() } : {}),
-            }
-          : {
-              ...sharedFields,
-              soundboardId: selectedBoard!.id,
-              ...(selectedBoard?.voiceRefText?.trim()
-                ? { voiceRefText: selectedBoard.voiceRefText.trim() }
-                : {}),
             }
 
       let createRes = await fetch("/api/video", {
@@ -1446,13 +1403,10 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
         </div>
       )}
 
-      {canUsePresets && !canUseBoards && (
+      {canUsePresets && (
         <div className="rounded-xl border border-border/50 bg-card/40 px-4 py-3 text-xs text-muted-foreground">
-          Tip: create a{" "}
-          <Link href="/app/soundboard/new" className="text-primary underline">
-            soundboard
-          </Link>{" "}
-          to use your own voice sample for videos.
+          Tip: use the <span className="text-foreground">Upload voice</span> tab to clone your own
+          sample for videos.
         </div>
       )}
 
@@ -1633,7 +1587,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
         <CardContent className="pt-5 space-y-3">
           <p className="text-sm font-medium">Voice</p>
 
-          {/* Three-way tab bar: stacked on narrow screens so labels are not crushed */}
+          {/* Two-way tab bar: preset or upload */}
           <div className="flex flex-col gap-1 rounded-lg border border-border/50 bg-secondary/20 p-1 sm:flex-row sm:gap-0 sm:p-0.5">
             <button
               type="button"
@@ -1649,21 +1603,6 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
             >
               <Sparkles className="h-4 w-4 shrink-0 sm:h-3.5 sm:w-3.5" />
               Preset voices
-            </button>
-            <button
-              type="button"
-              disabled={!canUseBoards}
-              onClick={() => setVoiceKind("board")}
-              className={[
-                "flex w-full items-center justify-start gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors sm:flex-1 sm:justify-center sm:gap-1.5 sm:py-2 sm:text-xs",
-                voiceKind === "board"
-                  ? "bg-card text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground",
-                !canUseBoards ? "opacity-40 pointer-events-none" : "",
-              ].join(" ")}
-            >
-              <Mic2 className="h-4 w-4 shrink-0 sm:h-3.5 sm:w-3.5" />
-              My soundboards
             </button>
             <button
               type="button"
@@ -1771,26 +1710,11 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
               <MoreOptions className="hidden sm:block">
                 <p>
                   Preset voices are synthesized with{" "}
-                  <span className="font-medium text-foreground">ElevenLabs</span>. You can also use a
-                  cloned soundboard or upload your own sample below.
+                  <span className="font-medium text-foreground">ElevenLabs</span>. You can also upload
+                  your own sample below.
                 </p>
               </MoreOptions>
             </div>
-          )}
-
-          {/* My soundboards panel */}
-          {voiceKind === "board" && canUseBoards && (
-            <select
-              value={selectedBoardId}
-              onChange={(e) => setSelectedBoardId(e.target.value)}
-              className="w-full rounded-md border border-border/60 bg-secondary/20 px-3 py-1.5 text-sm outline-none focus:border-primary/60"
-            >
-              {boards.map((board) => (
-                <option key={board.id} value={board.id}>
-                  {board.title} — {board.speakerLabel}
-                </option>
-              ))}
-            </select>
           )}
 
           {/* Upload voice panel */}
@@ -1952,7 +1876,7 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
             </div>
           )}
 
-          {!canUsePresets && !canUseBoards && voiceKind !== "upload" && (
+          {!canUsePresets && voiceKind !== "upload" && (
             <p className="text-xs text-muted-foreground">No voice sources available.</p>
           )}
         </CardContent>
@@ -2159,13 +2083,9 @@ export function NewVideoForm({ boards, categories, presets }: Props) {
                 ? selectedPreset
                   ? `Preset — ${selectedPreset.label}`
                   : "Preset — none"
-                : voiceKind === "upload"
-                  ? voiceSampleUrl
-                    ? `Upload — ${voiceSampleName || "sample"}`
-                    : "Upload — none"
-                  : selectedBoard
-                    ? `Soundboard — ${selectedBoard.title}`
-                    : "Soundboard — none"}
+                : voiceSampleUrl
+                  ? `Upload — ${voiceSampleName || "sample"}`
+                  : "Upload — none"}
             </span>
           </p>
           <p>

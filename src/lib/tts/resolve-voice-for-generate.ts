@@ -13,6 +13,32 @@ export type VoiceSynthesisContext = {
   refText?: string
 }
 
+/** Upload soundboard IVC clone — not preset catalog voices or sample URLs. */
+export function isEphemeralSoundboardClone(
+  manifest: Pick<SoundboardManifest, "voicePresetId" | "voiceId" | "voiceSampleUrl">
+): boolean {
+  if (manifest.voicePresetId) return false
+  const sample = manifest.voiceSampleUrl.trim()
+  const vid = manifest.voiceId.trim()
+  if (!sample || !vid || vid === sample) return false
+  return !/^https?:\/\//i.test(vid)
+}
+
+/** Delete upload IVC clone and return manifest voiceId (sample URL for re-clone on regenerate). */
+export async function releaseEphemeralSoundboardClone(
+  provider: TTSProvider,
+  manifest: Pick<SoundboardManifest, "voicePresetId" | "voiceSampleUrl">,
+  clonedVoiceId: string
+): Promise<string> {
+  if (!isEphemeralSoundboardClone({ ...manifest, voiceId: clonedVoiceId })) {
+    return clonedVoiceId.trim()
+  }
+  await provider.deleteVoice(clonedVoiceId.trim()).catch((err) => {
+    console.error("[tts] ephemeral soundboard clone delete failed:", err)
+  })
+  return manifest.voiceSampleUrl.trim()
+}
+
 /**
  * Prepare soundboard: clone when needed (EL IVC), persist manifest updates.
  */

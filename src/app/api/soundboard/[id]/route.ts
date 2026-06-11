@@ -3,7 +3,7 @@ import { currentUser } from "@clerk/nextjs/server"
 import { getManifestStore } from "@/lib/storage"
 import type { SoundboardManifest } from "@/lib/manifests/types"
 import { getTtsProviderForTier } from "@/lib/providers"
-import { resolveManifestTtsTier } from "@/lib/tts/tiers"
+import { isEphemeralSoundboardClone } from "@/lib/tts/resolve-voice-for-generate"
 
 export async function DELETE(
   _req: Request,
@@ -24,12 +24,7 @@ export async function DELETE(
 
   if (process.env.NEXT_PUBLIC_MOCK_MODE !== "true") {
     try {
-      const tier = resolveManifestTtsTier(manifest)
-      if (
-        tier === "elevenlabs" &&
-        !manifest.voicePresetId &&
-        manifest.voiceId.trim() !== manifest.voiceSampleUrl.trim()
-      ) {
+      if (isEphemeralSoundboardClone(manifest)) {
         await getTtsProviderForTier("elevenlabs").deleteVoice(manifest.voiceId.trim())
       }
     } catch (err) {
