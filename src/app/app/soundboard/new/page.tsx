@@ -20,7 +20,7 @@ import {
   Info,
 } from "lucide-react"
 import { trimAndEncodeAudio } from "@/lib/audio/trim-and-encode"
-import { uploadRawFileToBlob } from "@/lib/client/blob-upload"
+import { uploadAndFinalize, type UploadPhase } from "@/lib/client/blob-upload"
 import { GeneratingCard } from "@/components/soundboard/GeneratingCard"
 import { toggleOrPlayPresetPreview } from "@/lib/voice-presets/preset-preview-client"
 import type {
@@ -110,6 +110,8 @@ export default function NewSoundboardPage() {
   const [stage, setStage] = useState<Stage>("idle")
   const [error, setError] = useState("")
   const [removingSample, setRemovingSample] = useState(false)
+  const [uploadPct, setUploadPct] = useState<number | null>(null)
+  const [uploadPhase, setUploadPhase] = useState<UploadPhase | null>(null)
 
   const [voiceMode, setVoiceMode] = useState<VoiceMode>("upload")
   const [categories, setCategories] = useState<VoicePresetCategory[]>([])
@@ -271,16 +273,18 @@ export default function NewSoundboardPage() {
     }
 
     setStage("uploading")
+    setUploadPct(0)
+    setUploadPhase("transfer")
 
     try {
-      const rawUrl = await uploadRawFileToBlob(processedFile, "voice", { userId: user.id })
-      const res = await fetch("/api/upload", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rawUrl }),
+      const data = await uploadAndFinalize<{ url: string; durationSeconds: number }>({
+        file: processedFile,
+        kind: "voice",
+        userId: user.id,
+        finalizeUrl: "/api/upload",
+        onPhase: setUploadPhase,
+        onProgress: (p) => setUploadPct(Math.round(p)),
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error ?? "Upload failed")
       setSampleUrl(data.url)
       setSamplePreviewUrl(URL.createObjectURL(processedFile))
       setSampleDuration(data.durationSeconds)
@@ -292,6 +296,9 @@ export default function NewSoundboardPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed")
       setStage("idle")
+    } finally {
+      setUploadPct(null)
+      setUploadPhase(null)
     }
   }
 
@@ -824,7 +831,19 @@ export default function NewSoundboardPage() {
                 ) : stage === "uploading" ? (
                   <>
                     <Loader2 className="h-6 w-6 animate-spin" />
-                    <span>Uploading…</span>
+                    <span>
+                      {uploadPhase === "processing"
+                        ? "Processing your file…"
+                        : `Uploading…${uploadPct != null ? ` ${uploadPct}%` : ""}`}
+                    </span>
+                    {uploadPhase !== "processing" && uploadPct != null ? (
+                      <span className="block h-1 w-40 overflow-hidden rounded-full bg-border/60">
+                        <span
+                          className="block h-full rounded-full bg-primary transition-[width] duration-200"
+                          style={{ width: `${uploadPct}%` }}
+                        />
+                      </span>
+                    ) : null}
                   </>
                 ) : (
                   <>

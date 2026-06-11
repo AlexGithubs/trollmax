@@ -25,7 +25,7 @@ import {
   Clock,
 } from "lucide-react"
 import { trimAndEncodeAudio } from "@/lib/audio/trim-and-encode"
-import { uploadRawFileToBlob } from "@/lib/client/blob-upload"
+import { uploadAndFinalize } from "@/lib/client/blob-upload"
 import type {
   VoicePresetPublic,
   VoicePresetCategory,
@@ -321,6 +321,8 @@ export function NewVideoForm({ categories, presets }: Props) {
   const [voiceSampleName, setVoiceSampleName] = useState("")
   const [voiceUploadRefText, setVoiceUploadRefText] = useState("")
   const [voiceUploadError, setVoiceUploadError] = useState("")
+  const [voiceUploadPct, setVoiceUploadPct] = useState<number | null>(null)
+  const [voiceUploadProcessing, setVoiceUploadProcessing] = useState(false)
   const [removingVoiceSample, setRemovingVoiceSample] = useState(false)
   const voiceFileInputRef = useRef<HTMLInputElement>(null)
   const [backgroundVideoId, setBackgroundVideoId] = useState("minecraft")
@@ -654,16 +656,18 @@ export function NewVideoForm({ categories, presets }: Props) {
     }
 
     setVoiceUploadStage("uploading")
+    setVoiceUploadPct(0)
+    setVoiceUploadProcessing(false)
 
     try {
-      const rawUrl = await uploadRawFileToBlob(processedFile, "voice", { userId: user.id })
-      const res = await fetch("/api/upload", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rawUrl }),
+      const data = await uploadAndFinalize<{ url: string; durationSeconds: number }>({
+        file: processedFile,
+        kind: "voice",
+        userId: user.id,
+        finalizeUrl: "/api/upload",
+        onPhase: (phase) => setVoiceUploadProcessing(phase === "processing"),
+        onProgress: (p) => setVoiceUploadPct(Math.round(p)),
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error ?? "Upload failed")
       setVoiceSampleUrl(data.url)
       setVoiceSamplePreviewUrl(URL.createObjectURL(processedFile))
       setVoiceSampleDuration(data.durationSeconds)
@@ -675,6 +679,9 @@ export function NewVideoForm({ categories, presets }: Props) {
     } catch (err) {
       setVoiceUploadError(err instanceof Error ? err.message : "Upload failed")
       setVoiceUploadStage("idle")
+    } finally {
+      setVoiceUploadPct(null)
+      setVoiceUploadProcessing(false)
     }
   }
 
@@ -806,17 +813,27 @@ export function NewVideoForm({ categories, presets }: Props) {
       // finalize server-side into a normalized, byte-capped JPEG.
       setHeadshotBusyLabel("Uploading…")
       const fileToUpload = jpegFile ?? file
-      const rawUrl = await uploadRawFileToBlob(fileToUpload, "headshot", { userId: user.id })
-
-      setHeadshotBusyLabel("Preparing photo…")
-      const res = await fetch("/api/headshot-upload", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rawUrl }),
-      })
-      const data = (await res.json()) as { error?: string; url?: string }
-      if (!res.ok || !data.url) {
-        setError(data.error ?? "Upload failed")
+      let data: { url?: string }
+      try {
+        data = await uploadAndFinalize<{ url?: string }>({
+          file: fileToUpload,
+          kind: "headshot",
+          userId: user.id,
+          finalizeUrl: "/api/headshot-upload",
+          onPhase: (phase) =>
+            setHeadshotBusyLabel(phase === "processing" ? "Preparing photo…" : "Uploading…"),
+          onProgress: (p) => setHeadshotBusyLabel(`Uploading… ${Math.round(p)}%`),
+        })
+      } catch (uploadErr) {
+        setError(uploadErr instanceof Error ? uploadErr.message : "Upload failed")
+        setHeadshotImageUrl("")
+        setHeadshotName("")
+        setHeadshotPreviewUrl("")
+        if (headshotInputRef.current) headshotInputRef.current.value = ""
+        return
+      }
+      if (!data.url) {
+        setError("Upload failed")
         setHeadshotImageUrl("")
         setHeadshotName("")
         setHeadshotPreviewUrl("")
@@ -1792,7 +1809,11 @@ export function NewVideoForm({ categories, presets }: Props) {
                     <>
                       <Loader2 className="h-6 w-6 animate-spin text-primary" />
                       <span className="text-sm text-muted-foreground">
-                        {voiceUploadStage === "processing" ? "Processing audio…" : "Uploading…"}
+                        {voiceUploadStage === "processing"
+                          ? "Processing audio…"
+                          : voiceUploadProcessing
+                            ? "Processing your file…"
+                            : `Uploading…${voiceUploadPct != null ? ` ${voiceUploadPct}%` : ""}`}
                       </span>
                     </>
                   ) : (

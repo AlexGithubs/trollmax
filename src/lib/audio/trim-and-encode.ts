@@ -14,18 +14,16 @@ const MIN_DURATION_S = 6
 export async function trimAndEncodeAudio(file: File): Promise<Blob> {
   try {
     const arrayBuffer = await file.arrayBuffer()
-    const ctx = new AudioContext({ sampleRate: TARGET_SAMPLE_RATE })
 
-    let audioBuffer: AudioBuffer
-    try {
-      audioBuffer = await ctx.decodeAudioData(arrayBuffer)
-    } finally {
-      ctx.close()
-    }
+    // Decode at the platform's native rate. We must NOT pass a custom sampleRate to
+    // the AudioContext constructor — iOS Safari throws on that, which previously sent
+    // the whole flow into the "upload the raw file" fallback (a huge video over
+    // mobile). Resampling to TARGET_SAMPLE_RATE happens separately via OfflineAudioContext.
+    const decoded = await decodeAudioFile(arrayBuffer)
 
-    // Mix to mono
-    const mono = mixToMono(audioBuffer)
-    const sr = audioBuffer.sampleRate // should be TARGET_SAMPLE_RATE
+    // Downmix to mono + resample to TARGET_SAMPLE_RATE in one offline render.
+    const mono = await resampleToMono(decoded, TARGET_SAMPLE_RATE)
+    const sr = TARGET_SAMPLE_RATE
 
     // Find silence boundaries
     let start = 0
@@ -62,17 +60,63 @@ export async function trimAndEncodeAudio(file: File): Promise<Blob> {
   }
 }
 
-function mixToMono(buf: AudioBuffer): Float32Array {
-  if (buf.numberOfChannels === 1) return buf.getChannelData(0)
-  const len = buf.length
-  const out = new Float32Array(len)
-  const n = buf.numberOfChannels
-  for (let ch = 0; ch < n; ch++) {
-    const ch_data = buf.getChannelData(ch)
-    for (let i = 0; i < len; i++) out[i] += ch_data[i]
+type AudioContextCtor = typeof AudioContext
+
+function getAudioContextCtor(): AudioContextCtor {
+  const w = window as unknown as {
+    AudioContext?: AudioContextCtor
+    webkitAudioContext?: AudioContextCtor
   }
-  for (let i = 0; i < len; i++) out[i] /= n
-  return out
+  const Ctor = w.AudioContext ?? w.webkitAudioContext
+  if (!Ctor) throw new Error("Web Audio is not supported in this browser.")
+  return Ctor
+}
+
+/** Decode using a default-rate context (max cross-browser/iOS compatibility). */
+async function decodeAudioFile(arrayBuffer: ArrayBuffer): Promise<AudioBuffer> {
+  const Ctor = getAudioContextCtor()
+  const ctx = new Ctor()
+  try {
+    // Some Safari versions only support the callback form of decodeAudioData.
+    return await new Promise<AudioBuffer>((resolve, reject) => {
+      const maybePromise = ctx.decodeAudioData(
+        arrayBuffer,
+        (buf) => resolve(buf),
+        (err) => reject(err ?? new Error("decodeAudioData failed"))
+      ) as unknown as Promise<AudioBuffer> | undefined
+      if (maybePromise && typeof maybePromise.then === "function") {
+        maybePromise.then(resolve, reject)
+      }
+    })
+  } finally {
+    void ctx.close()
+  }
+}
+
+/** Downmix to mono and resample to targetRate via an offline render. */
+async function resampleToMono(
+  buf: AudioBuffer,
+  targetRate: number
+): Promise<Float32Array> {
+  const OfflineCtor =
+    (window as unknown as { OfflineAudioContext?: typeof OfflineAudioContext })
+      .OfflineAudioContext ??
+    (window as unknown as { webkitOfflineAudioContext?: typeof OfflineAudioContext })
+      .webkitOfflineAudioContext
+
+  // No OfflineAudioContext (extremely old browser): bail so the caller uploads the
+  // original file and the server extracts/normalizes the audio instead of us emitting
+  // a wrong-sample-rate WAV.
+  if (!OfflineCtor) throw new Error("OfflineAudioContext unavailable")
+
+  const frames = Math.max(1, Math.ceil(buf.duration * targetRate))
+  const offline = new OfflineCtor(1, frames, targetRate)
+  const source = offline.createBufferSource()
+  source.buffer = buf
+  source.connect(offline.destination) // multi-channel → mono destination auto-downmixes
+  source.start()
+  const rendered = await offline.startRendering()
+  return rendered.getChannelData(0)
 }
 
 function encodeWav(samples: Float32Array, sampleRate: number): Blob {

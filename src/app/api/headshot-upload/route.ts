@@ -1,4 +1,7 @@
 export const runtime = "nodejs"
+// Downloading a large phone photo (HEIC/PNG) from Blob and normalizing it with sharp
+// can exceed the default function budget; give it headroom so big uploads don't hang.
+export const maxDuration = 60
 
 import { BlobNotFoundError } from "@vercel/blob"
 import { NextResponse } from "next/server"

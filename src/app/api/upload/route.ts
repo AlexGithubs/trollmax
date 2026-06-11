@@ -1,4 +1,8 @@
 export const runtime = "nodejs"
+// Downloading a large video from Blob and running ffmpeg audio extraction can take
+// well past the default function budget; give it real headroom so big mobile uploads
+// don't get killed mid-process (which surfaced to users as an "endless uploading" hang).
+export const maxDuration = 120
 
 import { BlobNotFoundError } from "@vercel/blob"
 import { NextResponse } from "next/server"
