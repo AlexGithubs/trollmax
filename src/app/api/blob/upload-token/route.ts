@@ -16,7 +16,7 @@ import { checkRateLimit } from "@/lib/rate-limit"
 
 /** Generous ceilings — the finalize routes enforce the real product limits. */
 const MAX_BYTES: Record<string, number> = {
-  voice: 120 * 1024 * 1024, // video-with-audio sources can be large
+  voice: 210 * 1024 * 1024, // video-with-audio sources can be large (phone 4K/HEVC)
   headshot: 30 * 1024 * 1024,
 }
 

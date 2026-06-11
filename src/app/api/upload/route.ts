@@ -18,7 +18,9 @@ import { extractAudioFromVideoToMp3 } from "@/lib/media/extract-audio-from-video
 import { z } from "zod"
 
 const MAX_AUDIO_BYTES = 15 * 1024 * 1024
-const MAX_VIDEO_BYTES = 80 * 1024 * 1024
+// Phone videos are large (a 60s 4K/HEVC clip is easily 80–150 MB). Only the audio is
+// kept, but the raw upload has to fit; cap generously so real recordings aren't rejected.
+const MAX_VIDEO_BYTES = 200 * 1024 * 1024
 
 // Fallback MIME when browser sends empty type (common for .m4a on macOS/iOS)
 const EXT_TO_MIME: Record<string, string> = {

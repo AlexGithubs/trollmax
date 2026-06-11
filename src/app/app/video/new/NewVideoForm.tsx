@@ -640,15 +640,21 @@ export function NewVideoForm({ categories, presets }: Props) {
     }
     const prevUrl = voiceSampleUrl
     setVoiceUploadError("")
-    setVoiceUploadStage("processing")
 
-    let processedFile: File
+    // Try to decode + downmix to a small WAV in the browser (works for audio and for
+    // videos on desktop). iOS Safari can't decode audio out of a video container, so it
+    // falls back to uploading the raw file, which is extracted server-side.
+    let processedFile: File = file
+    setVoiceUploadStage("processing")
     try {
       const trimmed = await trimAndEncodeAudio(file)
-      const usedClientWav = trimmed !== file
-      processedFile = usedClientWav
-        ? new File([trimmed], file.name.replace(/\.\w+$/, ".wav"), { type: "audio/wav" })
-        : file
+      if (trimmed !== file) {
+        processedFile = new File(
+          [trimmed],
+          file.name.replace(/\.\w+$/, ".wav"),
+          { type: "audio/wav" }
+        )
+      }
     } catch (err) {
       setVoiceUploadError(err instanceof Error ? err.message : "Could not process audio")
       setVoiceUploadStage("idle")
@@ -1822,7 +1828,7 @@ export function NewVideoForm({ categories, presets }: Props) {
                       <div>
                         <p className="text-sm font-medium">Drop audio/video here or click to browse</p>
                         <p className="upload-dropzone-hint mt-0.5 text-xs text-muted-foreground">
-                          MP3, WAV, M4A, or video with audio · 6–60 sec · 15 MB max
+                          MP3, WAV, M4A, or video with audio · 6–60 sec · 15 MB audio / 200 MB video
                         </p>
                       </div>
                     </>

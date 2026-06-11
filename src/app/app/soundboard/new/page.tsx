@@ -255,17 +255,21 @@ export default function NewSoundboardPage() {
     }
     const previousSampleUrl = sampleUrl
     setError("")
-    setStage("processing")
 
-    let processedFile: File
+    // Try to decode + downmix to a small WAV in the browser. This works for audio files
+    // and for videos on desktop, keeping uploads tiny. iOS Safari can't decode audio out
+    // of a video container, so it falls back to uploading the raw file (extracted server-side).
+    let processedFile: File = file
+    setStage("processing")
     try {
       const trimmed = await trimAndEncodeAudio(file)
-      const usedClientWav = trimmed !== file
-      processedFile = usedClientWav
-        ? new File([trimmed], file.name.replace(/\.\w+$/, ".wav"), {
-            type: "audio/wav",
-          })
-        : file
+      if (trimmed !== file) {
+        processedFile = new File(
+          [trimmed],
+          file.name.replace(/\.\w+$/, ".wav"),
+          { type: "audio/wav" }
+        )
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not process audio")
       setStage("idle")
@@ -851,7 +855,7 @@ export default function NewSoundboardPage() {
                     <span>Drop audio/video here or click to browse</span>
                     <span className="upload-dropzone-hint text-xs opacity-70">
                       Best results with 10–20s of clear speech · audio or video (mp4, mov, …) · max 15 MB audio /
-                      80 MB video · up to 60s
+                      200 MB video · up to 60s
                     </span>
                   </>
                 )}

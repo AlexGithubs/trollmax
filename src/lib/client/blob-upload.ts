@@ -13,9 +13,6 @@ import { upload } from "@vercel/blob/client"
 
 export type BlobUploadKind = "voice" | "headshot"
 
-/** Files above this size use multipart upload for resilience on flaky mobile networks. */
-const MULTIPART_THRESHOLD_BYTES = 8 * 1024 * 1024
-
 function safeExt(fileName: string, fallback: string): string {
   const ext = fileName.split(".").pop()?.toLowerCase().replace(/[^a-z0-9]/g, "") ?? ""
   return ext || fallback
@@ -39,12 +36,15 @@ export async function uploadRawFileToBlob(
   const ext = safeExt(file.name, kind === "headshot" ? "jpg" : "bin")
   const pathname = `samples/${opts.userId}/raw/${base}.${ext}`
 
+  // Single-shot upload (no multipart). Multipart client uploads were stalling at 0% on
+  // both desktop and mobile for large files; a single PUT is simpler, reports byte-level
+  // progress continuously, and reliably handles the file sizes we accept here.
   const result = await upload(pathname, file, {
     access: "private",
     handleUploadUrl: "/api/blob/upload-token",
     contentType: file.type || undefined,
     clientPayload: JSON.stringify({ kind }),
-    multipart: file.size > MULTIPART_THRESHOLD_BYTES,
+    multipart: false,
     ...(opts.onProgress
       ? { onUploadProgress: (p) => opts.onProgress!(p.percentage) }
       : {}),
