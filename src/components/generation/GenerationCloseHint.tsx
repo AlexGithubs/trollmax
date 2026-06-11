@@ -1,35 +1,32 @@
 "use client"
 
-import Link from "next/link"
 import { Button } from "@/components/ui/button"
 
 type Props = {
   product: "video" | "soundboard"
-  manifestId: string
-  /** When set, show a button that navigates away without cancelling server-side generation. */
+  /** When set, shows an explicit "leave" action that navigates away without cancelling generation. */
   onLeave?: () => void
 }
 
-export function GenerationCloseHint({ product, manifestId, onLeave }: Props) {
-  const progressHref =
-    product === "video" ? `/app/video/${manifestId}` : `/app/soundboard/${manifestId}`
+/**
+ * Reassurance shown on the generation screen. The screen itself is the live progress
+ * view, so this offers a single, clearly-labelled way to *leave* (not a redundant
+ * "view progress" button) — generation continues server-side either way.
+ */
+export function GenerationCloseHint({ product, onLeave }: Props) {
   const noun = product === "video" ? "video" : "soundboard"
 
   return (
-    <div className="space-y-3 rounded-lg border border-border/50 bg-secondary/20 px-4 py-3 text-sm text-muted-foreground">
+    <div className="space-y-2 rounded-lg border border-border/50 bg-secondary/20 px-4 py-3 text-center text-xs text-muted-foreground">
       <p className="text-balance">
-        You can leave this page — your {noun} will keep generating. Check progress anytime from
-        your dashboard.
+        Your {noun} keeps generating even if you leave — it&apos;ll be waiting in your dashboard
+        when it&apos;s done.
       </p>
       {onLeave ? (
-        <Button type="button" variant="outline" size="sm" onClick={onLeave}>
-          View progress
+        <Button type="button" variant="ghost" size="sm" className="text-xs" onClick={onLeave}>
+          Leave &amp; check later
         </Button>
-      ) : (
-        <Button asChild variant="outline" size="sm">
-          <Link href={progressHref}>View progress</Link>
-        </Button>
-      )}
+      ) : null}
     </div>
   )
 }

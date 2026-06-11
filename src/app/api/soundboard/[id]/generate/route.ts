@@ -1,6 +1,6 @@
 export const maxDuration = 300
 
-import { NextResponse } from "next/server"
+import { NextResponse, after } from "next/server"
 import { currentUser } from "@clerk/nextjs/server"
 import { nanoid } from "nanoid"
 import { getManifestStore } from "@/lib/storage"
@@ -21,7 +21,10 @@ import {
   tryDebitBananaCredits,
   creditBananaCredits,
 } from "@/lib/billing/banana-credits"
-import { jsonGenerationErrorResponse } from "@/lib/security/generation-error"
+import {
+  jsonGenerationErrorResponse,
+  logGenerationFailure,
+} from "@/lib/security/generation-error"
 import {
   getProductionDependencyIssues,
   shouldEnforceProductionDeps,
@@ -86,83 +89,23 @@ export async function POST(
   if (!raw) return NextResponse.json({ error: "Not found" }, { status: 404 })
 
   const lockKey = `generate_lock:soundboard:${id}`
-  let lockHeld = false
-  let creditsDebited = 0
-  let voiceId: string | undefined
-  let refTextForSynth: string | undefined
-  let provider: TTSProvider | undefined
-  let manifestSnapshot: SoundboardManifest | undefined
+  const releaseLock = () => store.del(lockKey).catch(() => {})
 
+  let manifest: SoundboardManifest
   try {
-    let manifest: SoundboardManifest
-    try {
-      manifest = JSON.parse(raw) as SoundboardManifest
-    } catch (err) {
-      return jsonGenerationErrorResponse("soundboard/generate:parse", err, 500, logCtx(id))
-    }
-
-    if (manifest.ownerId !== user.id) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-    }
-
-    const lockAcquired = typeof store.setNX === "function" ? await store.setNX(lockKey, 360) : true
-    if (!lockAcquired) {
-      if (manifest.status === "processing") return NextResponse.json(manifest)
-      return NextResponse.json({ error: "Generation already in progress. Please wait." }, { status: 409 })
-    }
-    lockHeld = true
-
-    // Idempotency — duplicate POSTs while a run is in flight should not start a second job.
-    if (manifest.status === "processing") {
-      return NextResponse.json(manifest)
-    }
-
-  const ent = await getUserEntitlements(user.id)
-  if (manifest.phrases.length > ent.maxPhrases) {
-    return NextResponse.json(
-      { error: `You can use up to ${ent.maxPhrases} phrases per board.` },
-      { status: 400 }
-    )
-  }
-  for (const phrase of manifest.phrases) {
-    if (phrase.length > ent.maxPhraseChars) {
-      return NextResponse.json(
-        {
-          error: `Phrases may be up to ${ent.maxPhraseChars} characters.`,
-          code: "PHRASE_LENGTH",
-        },
-        { status: 400 }
-      )
-    }
+    manifest = JSON.parse(raw) as SoundboardManifest
+  } catch (err) {
+    return jsonGenerationErrorResponse("soundboard/generate:parse", err, 500, logCtx(id))
   }
 
-  const requiresExpansion =
-    manifest.phrases.length > BASE_MAX_PHRASES ||
-    manifest.phrases.some((phrase) => phrase.length > BASE_MAX_PHRASE_CHARS)
-  const generationCost =
-    BANANA_CREDIT_COSTS.soundboardGenerate +
-    (requiresExpansion ? BANANA_CREDIT_COSTS.soundboardExpansion : 0)
+  if (manifest.ownerId !== user.id) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  }
 
-  genLog(id, "run_start", {
-    ttsTier: manifest.ttsTier ?? "elevenlabs",
-    voicePresetId: manifest.voicePresetId ?? null,
-    phraseCount: manifest.phrases.length,
-    generationCost,
-    requiresExpansion,
-  })
-
-  const canAfford = await canAffordBananaCredits(user.id, generationCost)
-  if (!canAfford) {
-    const balance = await getBananaCreditsBalance(user.id)
-    return NextResponse.json(
-      {
-        error: "Insufficient banana credits.",
-        code: "INSUFFICIENT_BANANA_CREDITS",
-        required: generationCost,
-        balance,
-      },
-      { status: 402 }
-    )
+  const lockAcquired = typeof store.setNX === "function" ? await store.setNX(lockKey, 360) : true
+  if (!lockAcquired) {
+    if (manifest.status === "processing") return NextResponse.json(manifest)
+    return NextResponse.json({ error: "Generation already in progress. Please wait." }, { status: 409 })
   }
 
   const updateProgress = async (patch: Partial<SoundboardManifest>) => {
@@ -175,324 +118,333 @@ export async function POST(
     )
   }
 
-  manifestSnapshot = { ...manifest }
-
-  await updateProgress({
-    status: "processing",
-    progressStep: "Starting…",
-    progressPct: 0,
-    progressDetail: undefined,
-    lastError: undefined,
-  })
-
-  const debit = await tryDebitBananaCredits(user.id, generationCost)
-  if (!debit.ok) {
-    await store.set(
-      `soundboard:${id}`,
-      JSON.stringify({ ...manifestSnapshot, updatedAt: new Date().toISOString() })
-    )
-    return NextResponse.json(
-      {
-        error: "Insufficient banana credits.",
-        code: "INSUFFICIENT_BANANA_CREDITS",
-        required: generationCost,
-        balance: debit.balance,
-      },
-      { status: 402 }
-    )
-  }
-  creditsDebited = generationCost
-  const balanceAfterDebit = debit.balance
-  genLog(id, "credits_debited", { generationCost, balanceAfterDebit })
-  genLog(id, "before_preparing_voice_update")
-
+  // ── Synchronous setup: validate, charge, mark processing (so we can return 402 etc.) ──
+  let generationCost: number
+  let balanceAfterDebit: number
+  let processing: SoundboardManifest
+  const manifestSnapshot: SoundboardManifest = { ...manifest }
   try {
-    await updateProgress({ progressStep: "Preparing voice…", progressPct: 5 })
-    genLog(id, "after_preparing_voice_update")
-    genLog(id, "voice_prep_begin")
-    const persist = async (next: SoundboardManifest) => {
-      await store.set(`soundboard:${id}`, JSON.stringify(next))
+    // Idempotency — duplicate POSTs while a run is in flight should not start a second job.
+    if (manifest.status === "processing") {
+      await releaseLock()
+      return NextResponse.json(manifest)
     }
-    const ctx = await resolveSoundboardVoiceForGenerate(manifest, persist)
-    provider = ctx.provider
-    voiceId = ctx.voiceId
-    refTextForSynth = ctx.refText
-    genLog(id, "voice_prep_ok", {
-      provider: provider.constructor?.name ?? "TTSProvider",
-      voiceId: voiceIdForLog(voiceId),
-      hasRefText: Boolean(refTextForSynth?.trim()),
-    })
-  } catch (err) {
-    console.error(
-      `[soundboard/generate] soundboardId=${id} step=voice_prep_failed`,
-      err instanceof Error ? err.message : err,
-      err instanceof Error ? err.stack : ""
-    )
-    await creditBananaCredits(user.id, generationCost).catch((refundErr) => {
-      console.error("[soundboard/generate] credit refund failed (voice):", refundErr)
-    })
-    await updateProgress({
-      status: "failed",
-      progressStep: "Failed",
-      progressPct: 100,
-      lastError: err instanceof Error ? err.message : String(err),
-    })
-    return jsonGenerationErrorResponse("soundboard/generate:voice", err, 500, logCtx(id))
-  }
 
-  if (!provider || !voiceId) {
-    return jsonGenerationErrorResponse(
-      "soundboard/generate:voice",
-      new Error("Voice preparation did not return a provider"),
-      500,
-      logCtx(id)
-    )
-  }
-
-  const ttsProvider = provider
-  const synthVoiceId = voiceId
-
-  async function synthesizeWithRetry(
-    phraseForSpeech: string,
-    retries = 4
-  ): Promise<{ audioUrl: string; durationSeconds: number }> {
-    try {
-      return await ttsProvider.synthesize({
-        voiceId: synthVoiceId,
-        text: phraseForSpeech,
-        language: "en",
-        ...(refTextForSynth ? { refText: refTextForSynth } : {}),
-      })
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      const is429 = msg.includes("429") || msg.toLowerCase().includes("throttled")
-      const m = msg.match(/"retry_after"\s*:\s*(\d+)/)
-      const waitMs = m ? (parseInt(m[1]) + 2) * 1000 : 15000
-      if (is429 && retries > 0) {
-        console.log(`[generate] 429 — waiting ${waitMs}ms, ${retries - 1} retries left`)
-        await sleep(waitMs)
-        return synthesizeWithRetry(phraseForSpeech, retries - 1)
+    const ent = await getUserEntitlements(user.id)
+    if (manifest.phrases.length > ent.maxPhrases) {
+      await releaseLock()
+      return NextResponse.json(
+        { error: `You can use up to ${ent.maxPhrases} phrases per board.` },
+        { status: 400 }
+      )
+    }
+    for (const phrase of manifest.phrases) {
+      if (phrase.length > ent.maxPhraseChars) {
+        await releaseLock()
+        return NextResponse.json(
+          {
+            error: `Phrases may be up to ${ent.maxPhraseChars} characters.`,
+            code: "PHRASE_LENGTH",
+          },
+          { status: 400 }
+        )
       }
-      throw err
     }
+
+    const requiresExpansion =
+      manifest.phrases.length > BASE_MAX_PHRASES ||
+      manifest.phrases.some((phrase) => phrase.length > BASE_MAX_PHRASE_CHARS)
+    generationCost =
+      BANANA_CREDIT_COSTS.soundboardGenerate +
+      (requiresExpansion ? BANANA_CREDIT_COSTS.soundboardExpansion : 0)
+
+    genLog(id, "run_start", {
+      ttsTier: manifest.ttsTier ?? "elevenlabs",
+      voicePresetId: manifest.voicePresetId ?? null,
+      phraseCount: manifest.phrases.length,
+      generationCost,
+      requiresExpansion,
+    })
+
+    const canAfford = await canAffordBananaCredits(user.id, generationCost)
+    if (!canAfford) {
+      const balance = await getBananaCreditsBalance(user.id)
+      await releaseLock()
+      return NextResponse.json(
+        {
+          error: "Insufficient banana credits.",
+          code: "INSUFFICIENT_BANANA_CREDITS",
+          required: generationCost,
+          balance,
+        },
+        { status: 402 }
+      )
+    }
+
+    processing = {
+      ...manifest,
+      status: "processing",
+      progressStep: "Starting…",
+      progressPct: 0,
+      progressDetail: undefined,
+      lastError: undefined,
+      updatedAt: new Date().toISOString(),
+    }
+    await store.set(`soundboard:${id}`, JSON.stringify(processing))
+
+    const debit = await tryDebitBananaCredits(user.id, generationCost)
+    if (!debit.ok) {
+      await store.set(
+        `soundboard:${id}`,
+        JSON.stringify({ ...manifestSnapshot, updatedAt: new Date().toISOString() })
+      )
+      await releaseLock()
+      return NextResponse.json(
+        {
+          error: "Insufficient banana credits.",
+          code: "INSUFFICIENT_BANANA_CREDITS",
+          required: generationCost,
+          balance: debit.balance,
+        },
+        { status: 402 }
+      )
+    }
+    balanceAfterDebit = debit.balance
+    genLog(id, "credits_debited", { generationCost, balanceAfterDebit })
+  } catch (setupErr) {
+    await releaseLock()
+    return jsonGenerationErrorResponse("soundboard/generate:setup", setupErr, 500, logCtx(id))
   }
 
-  const now = new Date().toISOString()
-  let clips: SoundClip[]
+  // ── Heavy pipeline runs AFTER the response so it survives client disconnects. ──
+  const costForRun = generationCost
+  after(async () => {
+    let provider: TTSProvider | undefined
+    let voiceId: string | undefined
+    let refTextForSynth: string | undefined
+    try {
+      genLog(id, "before_preparing_voice_update")
+      await updateProgress({ progressStep: "Preparing voice…", progressPct: 5 })
+      genLog(id, "voice_prep_begin")
+      const persist = async (next: SoundboardManifest) => {
+        await store.set(`soundboard:${id}`, JSON.stringify(next))
+      }
+      const ctx = await resolveSoundboardVoiceForGenerate(manifest, persist)
+      provider = ctx.provider
+      voiceId = ctx.voiceId
+      refTextForSynth = ctx.refText
+      genLog(id, "voice_prep_ok", {
+        provider: provider.constructor?.name ?? "TTSProvider",
+        voiceId: voiceIdForLog(voiceId),
+        hasRefText: Boolean(refTextForSynth?.trim()),
+      })
 
-  try {
-    clips = []
-    const total = manifest.phrases.length
-    const concurrency = Math.max(1, Math.min(3, total))
-    genLog(id, "clips_begin", { total, concurrency })
-    let completed = 0
+      const ttsProvider = provider
+      const synthVoiceId = voiceId
 
-    // Preserve original order in output.
-    const results: Array<
-      | { ok: true; idx: number; phrase: string; audioUrl: string; durationSeconds: number }
-      | { ok: false; idx: number; phrase: string; error: unknown }
-    > = []
-
-    let nextIdx = 0
-    const inFlight = new Set<Promise<void>>()
-
-    const launch = (idx: number) => {
-      const phrase = manifest.phrases[idx]!
-      const phraseForSpeech = normalizeTextForTTS(phrase)
-
-      const p = (async () => {
-        console.log(`[generate] Synthesizing "${phrase}" => "${phraseForSpeech}"`)
-        await updateProgress({
-          progressStep: "Synthesizing clips…",
-          progressPct: 10 + Math.round((completed / Math.max(1, total)) * 80),
-          progressDetail: `Starting clip ${idx + 1} of ${total}`,
-        })
+      const synthesizeWithRetry = async (
+        phraseForSpeech: string,
+        retries = 4
+      ): Promise<{ audioUrl: string; durationSeconds: number }> => {
         try {
-          const { audioUrl, durationSeconds } = await synthesizeWithRetry(phraseForSpeech)
-          results.push({ ok: true, idx, phrase, audioUrl, durationSeconds })
-        } catch (error) {
-          console.error(
-            `[soundboard/generate] soundboardId=${id} step=clip_synth_failed clip=${idx + 1}/${total}`,
-            error instanceof Error ? error.message : error,
-            error instanceof Error ? error.stack : ""
-          )
-          results.push({ ok: false, idx, phrase, error })
-        } finally {
-          completed++
+          return await ttsProvider.synthesize({
+            voiceId: synthVoiceId,
+            text: phraseForSpeech,
+            language: "en",
+            ...(refTextForSynth ? { refText: refTextForSynth } : {}),
+          })
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          const is429 = msg.includes("429") || msg.toLowerCase().includes("throttled")
+          const m = msg.match(/"retry_after"\s*:\s*(\d+)/)
+          const waitMs = m ? (parseInt(m[1]) + 2) * 1000 : 15000
+          if (is429 && retries > 0) {
+            console.log(`[generate] 429 — waiting ${waitMs}ms, ${retries - 1} retries left`)
+            await sleep(waitMs)
+            return synthesizeWithRetry(phraseForSpeech, retries - 1)
+          }
+          throw err
+        }
+      }
+
+      const now = new Date().toISOString()
+      const clips: SoundClip[] = []
+      const total = manifest.phrases.length
+      const concurrency = Math.max(1, Math.min(3, total))
+      genLog(id, "clips_begin", { total, concurrency })
+      let completed = 0
+
+      // Preserve original order in output.
+      const results: Array<
+        | { ok: true; idx: number; phrase: string; audioUrl: string; durationSeconds: number }
+        | { ok: false; idx: number; phrase: string; error: unknown }
+      > = []
+
+      let nextIdx = 0
+      const inFlight = new Set<Promise<void>>()
+
+      const launch = (idx: number) => {
+        const phrase = manifest.phrases[idx]!
+        const phraseForSpeech = normalizeTextForTTS(phrase)
+
+        const p = (async () => {
+          console.log(`[generate] Synthesizing "${phrase}" => "${phraseForSpeech}"`)
           await updateProgress({
             progressStep: "Synthesizing clips…",
             progressPct: 10 + Math.round((completed / Math.max(1, total)) * 80),
-            progressDetail: `Completed ${completed} of ${total}`,
+            progressDetail: `Starting clip ${idx + 1} of ${total}`,
           })
-        }
-      })().finally(() => {
-        inFlight.delete(p)
-      })
+          try {
+            const { audioUrl, durationSeconds } = await synthesizeWithRetry(phraseForSpeech)
+            results.push({ ok: true, idx, phrase, audioUrl, durationSeconds })
+          } catch (error) {
+            console.error(
+              `[soundboard/generate] soundboardId=${id} step=clip_synth_failed clip=${idx + 1}/${total}`,
+              error instanceof Error ? error.message : error,
+              error instanceof Error ? error.stack : ""
+            )
+            results.push({ ok: false, idx, phrase, error })
+          } finally {
+            completed++
+            await updateProgress({
+              progressStep: "Synthesizing clips…",
+              progressPct: 10 + Math.round((completed / Math.max(1, total)) * 80),
+              progressDetail: `Completed ${completed} of ${total}`,
+            })
+          }
+        })().finally(() => {
+          inFlight.delete(p)
+        })
 
-      inFlight.add(p)
-    }
+        inFlight.add(p)
+      }
 
-    while (nextIdx < total && inFlight.size < concurrency) {
-      launch(nextIdx++)
-    }
-
-    while (inFlight.size > 0) {
-      await Promise.race(inFlight)
       while (nextIdx < total && inFlight.size < concurrency) {
         launch(nextIdx++)
       }
-    }
 
-    const failed = results.find((r) => !r.ok) as
-      | { ok: false; idx: number; phrase: string; error: unknown }
-      | undefined
-    if (failed) {
-      throw failed.error instanceof Error
-        ? failed.error
-        : new Error(`Synthesis failed for phrase ${failed.idx + 1}`)
-    }
-
-    const okResults = results
-      .filter((r): r is { ok: true; idx: number; phrase: string; audioUrl: string; durationSeconds: number } => r.ok)
-      .sort((a, b) => a.idx - b.idx)
-
-    for (const r of okResults) {
-      const clipId = nanoid(8)
-      clips.push({
-        id: clipId,
-        label: r.phrase,
-        text: r.phrase,
-        audioUrl: `/api/soundboard/${id}/clips/${clipId}`,
-        sourceUrl: r.audioUrl,
-        durationSeconds: r.durationSeconds,
-        createdAt: now,
-      })
-    }
-  } catch (err) {
-    console.error(
-      `[soundboard/generate] soundboardId=${id} step=clips_failed`,
-      err instanceof Error ? err.message : err,
-      err instanceof Error ? err.stack : ""
-    )
-    if (provider && voiceId && manifestSnapshot) {
-      const resetVoiceId = await releaseEphemeralSoundboardClone(
-        provider,
-        manifestSnapshot,
-        voiceId
-      )
-      if (resetVoiceId !== voiceId) {
-        genLog(id, "ephemeral_voice_released", { reason: "clips_failed" })
-        await updateProgress({ voiceId: resetVoiceId })
-      }
-    }
-    await creditBananaCredits(user.id, generationCost).catch((refundErr) => {
-      console.error("[soundboard/generate] credit refund failed (clips):", refundErr)
-    })
-    const clipError = err instanceof Error ? err.message : String(err)
-    await updateProgress({
-      status: "failed",
-      progressStep: "Failed",
-      progressPct: 100,
-      lastError: clipError,
-    })
-    return jsonGenerationErrorResponse("soundboard/generate:clips", err, 500, logCtx(id))
-  }
-
-  const rawLatest = await store.get(`soundboard:${id}`)
-  let latestBase: SoundboardManifest = manifest
-  if (rawLatest) {
-    try {
-      latestBase = JSON.parse(rawLatest) as SoundboardManifest
-    } catch {
-      /* keep manifest; avoid post-success throw → outer catch → wrongful refund */
-    }
-  }
-
-  const persistedVoiceId = await releaseEphemeralSoundboardClone(
-    ttsProvider,
-    latestBase,
-    synthVoiceId
-  )
-  if (persistedVoiceId !== synthVoiceId) {
-    genLog(id, "ephemeral_voice_released", { reason: "complete" })
-  }
-
-  const updated: SoundboardManifest = {
-    ...latestBase,
-    voiceId: persistedVoiceId,
-    clips,
-    status: "complete",
-    progressStep: "Complete",
-    progressPct: 100,
-    progressDetail: undefined,
-    lastError: undefined,
-    updatedAt: now,
-  }
-  await store.set(`soundboard:${id}`, JSON.stringify(updated))
-  genLog(id, "complete", { clipCount: clips.length })
-  return NextResponse.json({
-    ...updated,
-    bananaCreditsCharged: generationCost,
-    bananaCreditsBalance: balanceAfterDebit,
-  })
-  } catch (unexpected) {
-    console.error(
-      `[soundboard/generate] soundboardId=${id} step=unexpected_failure`,
-      unexpected instanceof Error ? unexpected.message : unexpected,
-      unexpected instanceof Error ? unexpected.stack : ""
-    )
-    if (creditsDebited > 0) {
-      await creditBananaCredits(user.id, creditsDebited).catch((refundErr) => {
-        console.error("[soundboard/generate] credit refund failed (unexpected):", refundErr)
-      })
-    }
-    let resetVoiceId: string | undefined
-    if (provider && voiceId && manifestSnapshot) {
-      resetVoiceId = await releaseEphemeralSoundboardClone(
-        provider,
-        manifestSnapshot,
-        voiceId
-      )
-      if (resetVoiceId !== voiceId) {
-        genLog(id, "ephemeral_voice_released", { reason: "unexpected_failure" })
-      }
-    }
-    const curRaw = await store.get(`soundboard:${id}`)
-    if (curRaw) {
-      try {
-        const cur = JSON.parse(curRaw) as SoundboardManifest
-        if (cur.ownerId === user.id) {
-          const failMessage =
-            unexpected instanceof Error ? unexpected.message : String(unexpected)
-          const resetVoiceIdOnFail =
-            resetVoiceId ??
-            (provider && voiceId && manifestSnapshot
-              ? await releaseEphemeralSoundboardClone(provider, manifestSnapshot, voiceId)
-              : cur.voiceId)
-          await store.set(
-            `soundboard:${id}`,
-            JSON.stringify({
-              ...cur,
-              voiceId: resetVoiceIdOnFail,
-              status: "failed",
-              progressStep: "Failed",
-              progressPct: 100,
-              lastError: failMessage,
-              updatedAt: new Date().toISOString(),
-            })
-          )
+      while (inFlight.size > 0) {
+        await Promise.race(inFlight)
+        while (nextIdx < total && inFlight.size < concurrency) {
+          launch(nextIdx++)
         }
-      } catch {
-        /* ignore corrupt KV during error handling */
       }
+
+      const failedClip = results.find((r) => !r.ok) as
+        | { ok: false; idx: number; phrase: string; error: unknown }
+        | undefined
+      if (failedClip) {
+        throw failedClip.error instanceof Error
+          ? failedClip.error
+          : new Error(`Synthesis failed for phrase ${failedClip.idx + 1}`)
+      }
+
+      const okResults = results
+        .filter((r): r is { ok: true; idx: number; phrase: string; audioUrl: string; durationSeconds: number } => r.ok)
+        .sort((a, b) => a.idx - b.idx)
+
+      for (const r of okResults) {
+        const clipId = nanoid(8)
+        clips.push({
+          id: clipId,
+          label: r.phrase,
+          text: r.phrase,
+          audioUrl: `/api/soundboard/${id}/clips/${clipId}`,
+          sourceUrl: r.audioUrl,
+          durationSeconds: r.durationSeconds,
+          createdAt: now,
+        })
+      }
+
+      const rawLatest = await store.get(`soundboard:${id}`)
+      let latestBase: SoundboardManifest = manifest
+      if (rawLatest) {
+        try {
+          latestBase = JSON.parse(rawLatest) as SoundboardManifest
+        } catch {
+          /* keep manifest; avoid post-success throw → wrongful refund */
+        }
+      }
+
+      const persistedVoiceId = await releaseEphemeralSoundboardClone(
+        ttsProvider,
+        latestBase,
+        synthVoiceId
+      )
+      if (persistedVoiceId !== synthVoiceId) {
+        genLog(id, "ephemeral_voice_released", { reason: "complete" })
+      }
+
+      const updated: SoundboardManifest = {
+        ...latestBase,
+        voiceId: persistedVoiceId,
+        clips,
+        status: "complete",
+        progressStep: "Complete",
+        progressPct: 100,
+        progressDetail: undefined,
+        lastError: undefined,
+        updatedAt: now,
+      }
+      await store.set(`soundboard:${id}`, JSON.stringify(updated))
+      genLog(id, "complete", { clipCount: clips.length })
+    } catch (err) {
+      console.error(
+        `[soundboard/generate] soundboardId=${id} step=pipeline_failed`,
+        err instanceof Error ? err.message : err,
+        err instanceof Error ? err.stack : ""
+      )
+      // Refund — users are never charged for a failed run.
+      await creditBananaCredits(user.id, costForRun).catch((refundErr) => {
+        console.error("[soundboard/generate] credit refund failed:", refundErr)
+      })
+      // Release any ephemeral clone created during voice prep.
+      let resetVoiceId: string | undefined
+      if (provider && voiceId) {
+        resetVoiceId = await releaseEphemeralSoundboardClone(
+          provider,
+          manifestSnapshot,
+          voiceId
+        ).catch(() => undefined)
+        if (resetVoiceId && resetVoiceId !== voiceId) {
+          genLog(id, "ephemeral_voice_released", { reason: "pipeline_failed" })
+        }
+      }
+      const failMessage = err instanceof Error ? err.message : String(err)
+      const curRaw = await store.get(`soundboard:${id}`)
+      if (curRaw) {
+        try {
+          const cur = JSON.parse(curRaw) as SoundboardManifest
+          if (cur.ownerId === user.id) {
+            await store.set(
+              `soundboard:${id}`,
+              JSON.stringify({
+                ...cur,
+                ...(resetVoiceId ? { voiceId: resetVoiceId } : {}),
+                status: "failed",
+                progressStep: "Failed",
+                progressPct: 100,
+                lastError: failMessage,
+                updatedAt: new Date().toISOString(),
+              })
+            )
+          }
+        } catch {
+          /* ignore corrupt KV during error handling */
+        }
+      }
+      logGenerationFailure("soundboard/generate:pipeline", err, logCtx(id))
+    } finally {
+      await releaseLock()
     }
-    return jsonGenerationErrorResponse(
-      "soundboard/generate:unexpected",
-      unexpected,
-      500,
-      logCtx(id)
-    )
-  } finally {
-    if (lockHeld) await store.del(lockKey).catch(() => {})
-  }
+  })
+
+  return NextResponse.json(
+    {
+      ...processing,
+      bananaCreditsCharged: costForRun,
+      bananaCreditsBalance: balanceAfterDebit,
+    },
+    { status: 202 }
+  )
 }

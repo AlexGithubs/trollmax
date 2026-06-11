@@ -1,6 +1,7 @@
 export const maxDuration = 300
 
-import { NextResponse } from "next/server"
+import * as Sentry from "@sentry/nextjs"
+import { NextResponse, after } from "next/server"
 import { currentUser } from "@clerk/nextjs/server"
 import { getManifestStore, getFileStore } from "@/lib/storage"
 import { downloadBlobBuffer, isPrivateVercelBlobUrl } from "@/lib/storage/blob"
@@ -32,7 +33,11 @@ import {
   isGenerationCapabilityUnavailableError,
   isGenerationUserInputError,
 } from "@/lib/generation/errors"
-import { jsonGenerationErrorResponse } from "@/lib/security/generation-error"
+import {
+  jsonGenerationErrorResponse,
+  logGenerationFailure,
+} from "@/lib/security/generation-error"
+import { isLikelyUpstreamRateLimit, notifyOpsRateLimitEvent } from "@/lib/ops/rate-limit-alert"
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 const MODAL_TIMEOUT_RE = /modal ffmpeg request failed:\s*500[\s\S]*function execution timed out/i
@@ -50,6 +55,106 @@ function isModalComposeTimeout(err: unknown): boolean {
 function getTalkingHeadProvider(): "heygen" | "did" {
   const val = process.env.TALKING_HEAD_PROVIDER?.trim().toLowerCase()
   return val === "heygen" ? "heygen" : "did"
+}
+
+/** Whether the credentials needed for a given talking-head provider are present. */
+function isTalkingHeadProviderConfigured(provider: "heygen" | "did"): boolean {
+  if (provider === "heygen") return Boolean(process.env.HEYGEN_API_KEY?.trim())
+  return Boolean(
+    process.env.DID_API_KEY?.trim() ||
+      (process.env.DID_API_USERNAME?.trim() && process.env.DID_API_PASSWORD?.trim())
+  )
+}
+
+type TalkingHeadInput = {
+  headshotImageUrl: string
+  audioUrl: string
+  title: string
+  logRef: string
+}
+
+type TalkingHeadProgress = { attempt: number; status: string; elapsedSec: number }
+
+/** Run a single provider, mapping its poll callbacks into manifest progress copy. */
+async function runTalkingHeadProvider(
+  provider: "heygen" | "did",
+  input: TalkingHeadInput,
+  updateProgress: (patch: Partial<VideoManifest>) => Promise<void>
+): Promise<string> {
+  const onPoll = async ({ attempt, status, elapsedSec }: TalkingHeadProgress) => {
+    const step =
+      status === "created" || status === "pending"
+        ? "Queued at provider…"
+        : status === "started" || status === "processing"
+          ? provider === "heygen"
+            ? "Rendering talking head (~1–2 min)…"
+            : "Rendering talking head…"
+          : "Creating talking head…"
+    await updateProgress({
+      progressStep: step,
+      progressPct: Math.min(75, 45 + Math.round(elapsedSec / 2)),
+      progressDetail: `${provider} · ${status} · ${elapsedSec}s · poll ${attempt}`,
+    })
+  }
+
+  const commonInput = { ...input, onPoll }
+  console.time(`[video/generate] talking-head:${input.logRef}:${provider}`)
+  try {
+    return provider === "heygen"
+      ? await runHeygenTalkingHead(commonInput)
+      : await runDidTalkingHead(commonInput)
+  } finally {
+    console.timeEnd(`[video/generate] talking-head:${input.logRef}:${provider}`)
+  }
+}
+
+/**
+ * Run the primary talking-head provider; on a recoverable failure, fall back to the
+ * other provider once (when it is configured). Celebrity blocks and user-input errors
+ * are never retried. Provider failures are reported to Sentry so they can be diagnosed
+ * even though the user only sees friendly copy.
+ */
+async function runTalkingHeadWithFallback(
+  input: TalkingHeadInput,
+  updateProgress: (patch: Partial<VideoManifest>) => Promise<void>
+): Promise<string> {
+  const primary = getTalkingHeadProvider()
+  const secondary: "heygen" | "did" = primary === "heygen" ? "did" : "heygen"
+
+  try {
+    return await runTalkingHeadProvider(primary, input, updateProgress)
+  } catch (primaryErr) {
+    const nonRetryable =
+      isHeygenCelebrityBlockedError(primaryErr) ||
+      isDidCelebrityBlockedError(primaryErr) ||
+      isGenerationUserInputError(primaryErr)
+    if (nonRetryable || !isTalkingHeadProviderConfigured(secondary)) {
+      throw primaryErr
+    }
+
+    console.error(
+      `[video/generate] ${primary} talking-head failed for ${input.logRef}; falling back to ${secondary}:`,
+      primaryErr
+    )
+    Sentry.captureException(primaryErr, {
+      tags: { stage: "talking-head", provider: primary, fallback: secondary },
+      extra: { logRef: input.logRef },
+    })
+
+    await updateProgress({
+      progressStep: "Retrying talking head with a backup renderer…",
+      progressDetail: `${secondary} · retry`,
+    })
+
+    return await runTalkingHeadProvider(secondary, input, updateProgress)
+  }
+}
+
+/** Friendly, provider-agnostic copy for a talking-head failure that exhausted fallbacks. */
+function friendlyTalkingHeadMessage(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err)
+  if (msg.startsWith("D-ID")) return userMessageFromDidFailure(err)
+  return userMessageFromHeygenFailure(err)
 }
 
 export async function POST(
@@ -83,60 +188,75 @@ export async function POST(
     return NextResponse.json({ error: "Generation already in progress. Please wait." }, { status: 409 })
   }
 
-  try {
+  const releaseLock = () => store.del(lockKey).catch(() => {})
   const generationCost = videoGenerationCostBananaCredits(manifest.script.length)
-  const canAfford = await canAffordBananaCredits(user.id, generationCost)
-  if (!canAfford) {
-    const balance = await getBananaCreditsBalance(user.id)
-    return NextResponse.json(
-      {
-        error: "Insufficient banana credits.",
-        code: "INSUFFICIENT_BANANA_CREDITS",
-        required: generationCost,
-        balance,
-      },
-      { status: 402 }
-    )
-  }
 
-  // Idempotency guard
-  if (manifest.status === "processing") {
-    return NextResponse.json(manifest)
-  }
-
-  const now = new Date().toISOString()
-  const manifestSnapshot = { ...manifest }
-
-  // Mark as processing
-  const processing: VideoManifest = {
-    ...manifest,
-    status: "processing",
-    progressStep: "Starting…",
-    progressPct: 0,
-    progressDetail: null as unknown as undefined,
-    lastError: undefined,
-    lastErrorCode: undefined,
-    updatedAt: now,
-  }
-  await store.set(`video:${id}`, JSON.stringify(processing))
-
-  const debit = await tryDebitBananaCredits(user.id, generationCost)
-  if (!debit.ok) {
-    await store.set(`video:${id}`, JSON.stringify({ ...manifestSnapshot, updatedAt: new Date().toISOString() }))
-    return NextResponse.json(
-      {
-        error: "Insufficient banana credits.",
-        code: "INSUFFICIENT_BANANA_CREDITS",
-        required: generationCost,
-        balance: debit.balance,
-      },
-      { status: 402 }
-    )
-  }
-  const balanceAfterDebit = debit.balance
-
+  let processing: VideoManifest
+  let balanceAfterDebit: number
   try {
-    console.time(`[video/generate] pipeline:${id}`)
+    const canAfford = await canAffordBananaCredits(user.id, generationCost)
+    if (!canAfford) {
+      const balance = await getBananaCreditsBalance(user.id)
+      await releaseLock()
+      return NextResponse.json(
+        {
+          error: "Insufficient banana credits.",
+          code: "INSUFFICIENT_BANANA_CREDITS",
+          required: generationCost,
+          balance,
+        },
+        { status: 402 }
+      )
+    }
+
+    // Idempotency guard
+    if (manifest.status === "processing") {
+      await releaseLock()
+      return NextResponse.json(manifest)
+    }
+
+    const now = new Date().toISOString()
+    const manifestSnapshot = { ...manifest }
+
+    // Mark as processing
+    processing = {
+      ...manifest,
+      status: "processing",
+      progressStep: "Starting…",
+      progressPct: 0,
+      progressDetail: null as unknown as undefined,
+      lastError: undefined,
+      lastErrorCode: undefined,
+      updatedAt: now,
+    }
+    await store.set(`video:${id}`, JSON.stringify(processing))
+
+    const debit = await tryDebitBananaCredits(user.id, generationCost)
+    if (!debit.ok) {
+      await store.set(`video:${id}`, JSON.stringify({ ...manifestSnapshot, updatedAt: new Date().toISOString() }))
+      await releaseLock()
+      return NextResponse.json(
+        {
+          error: "Insufficient banana credits.",
+          code: "INSUFFICIENT_BANANA_CREDITS",
+          required: generationCost,
+          balance: debit.balance,
+        },
+        { status: 402 }
+      )
+    }
+    balanceAfterDebit = debit.balance
+  } catch (setupErr) {
+    await releaseLock()
+    return jsonGenerationErrorResponse("video/generate:setup", setupErr)
+  }
+
+  // Run the heavy pipeline AFTER the response is sent so it survives client
+  // disconnects (mobile backgrounding, navigation, flaky networks). The client
+  // polls the status endpoint for progress and the final result.
+  after(async () => {
+    try {
+      console.time(`[video/generate] pipeline:${id}`)
     const updateProgress = async (patch: Partial<VideoManifest>) => {
       const raw2 = await store.get(`video:${id}`)
       if (!raw2) return
@@ -197,59 +317,22 @@ export async function POST(
       let transcriptWords: Awaited<ReturnType<typeof transcribeForCaptions>> = []
 
       try {
-        const [words, didUrl] = await Promise.all([
+        const [words, talkingUrl] = await Promise.all([
           captionsEnabled
             ? transcribeForCaptions(audioUrl)
             : Promise.resolve([] as Awaited<ReturnType<typeof transcribeForCaptions>>),
-          (async () => {
-            const provider = getTalkingHeadProvider()
-            console.time(`[video/generate] talking-head:${id}`)
-            try {
-              const onPoll = async ({
-                attempt,
-                status,
-                elapsedSec,
-              }: {
-                attempt: number
-                status: string
-                elapsedSec: number
-              }) => {
-                // Normalise status strings from both providers into user-facing copy.
-                // D-ID:    created | started | processing | done | error
-                // HeyGen:  pending | processing | completed | failed
-                const step =
-                  status === "created" || status === "pending"
-                    ? "Queued at provider…"
-                    : status === "started" || status === "processing"
-                      ? provider === "heygen"
-                        ? "Rendering talking head (~1–2 min)…"
-                        : "Rendering talking head…"
-                      : "Creating talking head…"
-                await updateProgress({
-                  progressStep: step,
-                  progressPct: Math.min(75, 45 + Math.round(elapsedSec / 2)),
-                  progressDetail: `${provider} · ${status} · ${elapsedSec}s · poll ${attempt}`,
-                })
-              }
-
-              const commonInput = {
-                headshotImageUrl: manifest.headshotImageUrl!,
-                audioUrl,
-                title: manifest.title,
-                logRef: id,
-                onPoll,
-              }
-
-              return provider === "heygen"
-                ? await runHeygenTalkingHead(commonInput)
-                : await runDidTalkingHead(commonInput)
-            } finally {
-              console.timeEnd(`[video/generate] talking-head:${id}`)
-            }
-          })(),
+          runTalkingHeadWithFallback(
+            {
+              headshotImageUrl: manifest.headshotImageUrl!,
+              audioUrl,
+              title: manifest.title,
+              logRef: id,
+            },
+            updateProgress
+          ),
         ])
         transcriptWords = words
-        talkingVideoUrl = didUrl
+        talkingVideoUrl = talkingUrl
       } catch (parallelErr) {
         if (isGenerationUserInputError(parallelErr)) throw parallelErr
         if (isDidCelebrityBlockedError(parallelErr) || isHeygenCelebrityBlockedError(parallelErr)) {
@@ -264,13 +347,12 @@ export async function POST(
           throw parallelErr
         }
         console.error(`[video/generate] parallel pipeline failed (${id}):`, parallelErr)
-        // Route to provider-specific user-facing message so copy never mentions the wrong provider.
-        const provider = getTalkingHeadProvider()
-        const friendly =
-          provider === "heygen"
-            ? userMessageFromHeygenFailure(parallelErr)
-            : userMessageFromDidFailure(parallelErr)
-        throw new GenerationUserInputError(friendly)
+        Sentry.captureException(parallelErr, {
+          tags: { stage: "talking-head", outcome: "exhausted" },
+          extra: { logRef: id },
+        })
+        // Provider-agnostic copy — a fallback provider may have produced the final error.
+        throw new GenerationUserInputError(friendlyTalkingHeadMessage(parallelErr))
       } finally {
         console.timeEnd(`[video/generate] parallel:${id}`)
       }
@@ -356,11 +438,6 @@ export async function POST(
     }
     await store.set(`video:${id}`, JSON.stringify(completed))
     console.timeEnd(`[video/generate] pipeline:${id}`)
-    return NextResponse.json({
-      ...completed,
-      bananaCreditsCharged: generationCost,
-      bananaCreditsBalance: balanceAfterDebit,
-    })
   } catch (err) {
     // Refund credits so users are not charged for pipeline failures (D-ID timeout, Modal crash, etc.)
     await creditBananaCredits(user.id, generationCost).catch((refundErr) => {
@@ -385,9 +462,25 @@ export async function POST(
       updatedAt: new Date().toISOString(),
     }
     await store.set(`video:${id}`, JSON.stringify(failed))
-    return jsonGenerationErrorResponse("video/generate:pipeline", err)
-  }
+    logGenerationFailure("video/generate:pipeline", err, { id })
+    if (isLikelyUpstreamRateLimit(err)) {
+      notifyOpsRateLimitEvent({
+        kind: "upstream",
+        source: "video/generate:pipeline",
+        detail: err instanceof Error ? err.message : String(err),
+      })
+    }
   } finally {
-    await store.del(lockKey).catch(() => {})
-  }
+      await releaseLock()
+    }
+  })
+
+  return NextResponse.json(
+    {
+      ...processing,
+      bananaCreditsCharged: generationCost,
+      bananaCreditsBalance: balanceAfterDebit,
+    },
+    { status: 202 }
+  )
 }

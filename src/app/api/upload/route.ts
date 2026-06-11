@@ -7,6 +7,7 @@ import { parseBlob } from "music-metadata"
 import { nanoid } from "nanoid"
 import { getBlobPutAccess } from "@/lib/storage/blob-env-sync"
 import { getFileStore } from "@/lib/storage"
+import { downloadBlobBuffer } from "@/lib/storage/blob"
 import { userOwnsSampleUploadUrl } from "@/lib/storage/sample-upload-url"
 import { checkRateLimit } from "@/lib/rate-limit"
 import { extractAudioFromVideoToMp3 } from "@/lib/media/extract-audio-from-video"
@@ -80,29 +81,73 @@ function videoExtWithDot(fileName: string): string {
   return `.${safe}`
 }
 
+function extFromUrl(rawUrl: string): string {
+  try {
+    const path = decodeURIComponent(new URL(rawUrl, "http://localhost").pathname)
+    return path.split(".").pop()?.toLowerCase().replace(/[^a-z0-9]/g, "") ?? ""
+  } catch {
+    return ""
+  }
+}
+
+const FinalizeBodySchema = z.object({
+  /** URL of the raw file the client uploaded directly to Blob. */
+  rawUrl: z.string().min(1),
+})
+
+/**
+ * Finalizes a voice/video sample that was uploaded directly to Blob by the client.
+ * Downloads the raw blob, extracts audio if it is a video, validates duration, stores
+ * the processed audio, and deletes the raw upload. Returns the processed sample URL.
+ *
+ * Uploads no longer flow through this route's request body, so they are not subject to
+ * the ~4.5 MB serverless body limit (the cause of mobile "Load failed" on large files).
+ */
 export async function POST(req: Request) {
   const user = await currentUser()
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  if (!user) {
+    return NextResponse.json(
+      { error: "Sign in to upload.", code: "UNAUTHENTICATED" },
+      { status: 401 }
+    )
+  }
 
   const { allowed } = await checkRateLimit(user.id, "upload")
   if (!allowed) {
     return NextResponse.json({ error: "Rate limit exceeded. Try again later." }, { status: 429 })
   }
 
-  const formData = await req.formData()
-  const file = formData.get("file")
-  if (!(file instanceof Blob)) {
-    return NextResponse.json({ error: "No file provided" }, { status: 400 })
+  const json = await req.json().catch(() => null)
+  const parsed = FinalizeBodySchema.safeParse(json)
+  if (!parsed.success) {
+    return NextResponse.json({ error: "Invalid request body." }, { status: 400 })
   }
 
-  const fileAsFile = file as File
-  const fileName = fileAsFile.name ?? ""
-  const fileExt = fileName.split(".").pop()?.toLowerCase() ?? ""
-
-  let mimeType = file.type.split(";")[0].trim().toLowerCase()
-  if (!mimeType) {
-    mimeType = EXT_TO_MIME[fileExt] ?? ""
+  const rawUrl = parsed.data.rawUrl
+  if (!userOwnsSampleUploadUrl(rawUrl, user.id)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
+
+  const fileStore = getFileStore()
+  const deleteRaw = () => fileStore.delete(rawUrl).catch(() => {})
+
+  let buffer: Buffer
+  let contentType: string
+  try {
+    const downloaded = await downloadBlobBuffer(rawUrl)
+    buffer = downloaded.buffer
+    contentType = downloaded.contentType
+  } catch (err) {
+    console.error("[upload] could not read raw upload:", err)
+    return NextResponse.json(
+      { error: "Could not read your upload. Please try again." },
+      { status: 400 }
+    )
+  }
+
+  const fileExt = extFromUrl(rawUrl)
+  let mimeType = contentType.split(";")[0].trim().toLowerCase()
+  if (!mimeType) mimeType = EXT_TO_MIME[fileExt] ?? ""
 
   const audioMp4VideoContainer =
     mimeType === "audio/mp4" && (fileExt === "mp4" || fileExt === "m4v")
@@ -113,20 +158,23 @@ export async function POST(req: Request) {
     (!isExplicitAudio && VIDEO_EXT.has(fileExt))
 
   if (isVideo) {
-    if (file.size > MAX_VIDEO_BYTES) {
+    if (buffer.length > MAX_VIDEO_BYTES) {
+      await deleteRaw()
       return NextResponse.json(
         { error: `Video too large (max ${Math.round(MAX_VIDEO_BYTES / (1024 * 1024))} MB).` },
         { status: 400 }
       )
     }
   } else if (mimeType.startsWith("audio/")) {
-    if (file.size > MAX_AUDIO_BYTES) {
+    if (buffer.length > MAX_AUDIO_BYTES) {
+      await deleteRaw()
       return NextResponse.json(
         { error: `File too large (max ${Math.round(MAX_AUDIO_BYTES / (1024 * 1024))} MB)` },
         { status: 400 }
       )
     }
   } else {
+    await deleteRaw()
     return NextResponse.json(
       {
         error:
@@ -136,17 +184,17 @@ export async function POST(req: Request) {
     )
   }
 
-  let buffer = Buffer.from(await file.arrayBuffer())
   let storeMime = mimeType
   let storeExt = MIME_TO_EXT[mimeType] ?? (mimeType.startsWith("video/") ? "mp4" : "bin")
 
   if (isVideo) {
     try {
-      buffer = Buffer.from(await extractAudioFromVideoToMp3(buffer, videoExtWithDot(fileName)))
+      buffer = Buffer.from(await extractAudioFromVideoToMp3(buffer, videoExtWithDot(`f.${fileExt}`)))
       storeMime = "audio/mpeg"
       storeExt = "mp3"
     } catch (err) {
       console.error("[upload] video extract failed:", err)
+      await deleteRaw()
       return NextResponse.json(
         {
           error:
@@ -158,6 +206,7 @@ export async function POST(req: Request) {
       )
     }
     if (buffer.length > MAX_AUDIO_BYTES) {
+      await deleteRaw()
       return NextResponse.json(
         { error: "Extracted audio is too large. Try a shorter clip or lower-quality video." },
         { status: 400 }
@@ -167,26 +216,28 @@ export async function POST(req: Request) {
 
   let durationSeconds: number
   try {
-    const metadata = await parseBlob(new Blob([buffer], { type: storeMime }))
+    const metadata = await parseBlob(new Blob([new Uint8Array(buffer)], { type: storeMime }))
     durationSeconds = metadata.format.duration ?? 0
   } catch {
+    await deleteRaw()
     return NextResponse.json({ error: "Could not read audio file" }, { status: 400 })
   }
 
   if (durationSeconds < 6) {
+    await deleteRaw()
     return NextResponse.json(
       { error: `Audio too short (${durationSeconds.toFixed(1)}s). Minimum is 6 seconds.` },
       { status: 400 }
     )
   }
   if (durationSeconds > 60) {
+    await deleteRaw()
     return NextResponse.json(
       { error: `Audio too long (${durationSeconds.toFixed(1)}s). Maximum is 60 seconds.` },
       { status: 400 }
     )
   }
 
-  const fileStore = getFileStore()
   let url: string
   try {
     const result = await fileStore.upload(
@@ -198,8 +249,12 @@ export async function POST(req: Request) {
     url = result.url
   } catch (err) {
     console.error("[upload] fileStore.upload failed:", err)
+    await deleteRaw()
     return NextResponse.json({ error: "Storage upload failed. Please try again." }, { status: 500 })
   }
+
+  // Raw upload is no longer needed once the processed sample is stored.
+  await deleteRaw()
 
   const absoluteUrl = url.startsWith("http") ? url : `${new URL(req.url).origin}${url}`
   return NextResponse.json({ url: absoluteUrl, durationSeconds })

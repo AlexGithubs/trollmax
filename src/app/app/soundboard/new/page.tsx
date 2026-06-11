@@ -20,6 +20,7 @@ import {
   Info,
 } from "lucide-react"
 import { trimAndEncodeAudio } from "@/lib/audio/trim-and-encode"
+import { uploadRawFileToBlob } from "@/lib/client/blob-upload"
 import { GeneratingCard } from "@/components/soundboard/GeneratingCard"
 import { toggleOrPlayPresetPreview } from "@/lib/voice-presets/preset-preview-client"
 import type {
@@ -101,7 +102,7 @@ async function deleteSampleOnServer(url: string) {
 export default function NewSoundboardPage() {
   useTrackFormStarted("soundboard")
   const router = useRouter()
-  const { isSignedIn } = useUser()
+  const { isSignedIn, user } = useUser()
   const { openSignIn } = useClerk()
 
   const [ent, setEnt] = useState<BillingEntitlement | null>(null)
@@ -246,6 +247,10 @@ export default function NewSoundboardPage() {
   }
 
   async function processUploadFile(file: File) {
+    if (isSignedIn === false || !user?.id) {
+      openSignIn()
+      return
+    }
     const previousSampleUrl = sampleUrl
     setError("")
     setStage("processing")
@@ -266,11 +271,14 @@ export default function NewSoundboardPage() {
     }
 
     setStage("uploading")
-    const fd = new FormData()
-    fd.append("file", processedFile)
 
     try {
-      const res = await fetch("/api/upload", { method: "POST", body: fd })
+      const rawUrl = await uploadRawFileToBlob(processedFile, "voice", { userId: user.id })
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rawUrl }),
+      })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? "Upload failed")
       setSampleUrl(data.url)
@@ -556,24 +564,18 @@ export default function NewSoundboardPage() {
               Your clips are being created. This usually takes a minute or two.
             </p>
           </div>
-          {genId ? (
-            <GenerationCloseHint
-              product="soundboard"
-              manifestId={genId}
-              onLeave={() => router.push(`/app/soundboard/${genId}`)}
-            />
-          ) : null}
-          {error && (
-            <p className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-left text-sm text-destructive sm:text-center">
-              {error}
-            </p>
-          )}
           <GeneratingCard
             progressStep={progressStep}
             progressPct={progressPct}
             progressDetail={progressDetail}
             lastError={error || null}
           />
+          {genId ? (
+            <GenerationCloseHint
+              product="soundboard"
+              onLeave={() => router.push(`/app/soundboard/${genId}`)}
+            />
+          ) : null}
         </div>
       </div>
     )

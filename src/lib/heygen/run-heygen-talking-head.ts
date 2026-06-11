@@ -17,7 +17,8 @@ const HEYGEN_BASE = "https://api.heygen.com"
 const HEYGEN_POLL_INTERVAL_MS = 3_000
 /** Max consecutive 5xx status-check failures before giving up. */
 const HEYGEN_MAX_POLL_ERRORS = 3
-const HEYGEN_DEFAULT_MAX_WAIT_SEC = 120
+// HeyGen image-to-video commonly needs 1–3 minutes; 120s timed out too often under load.
+const HEYGEN_DEFAULT_MAX_WAIT_SEC = 180
 
 /**
  * Wall-clock budget for HeyGen to reach "completed" (ms).
@@ -226,10 +227,13 @@ export async function runHeygenTalkingHead(input: {
       if (isHeygenCelebrityCode(statusJson.data?.failure_code)) {
         throw new HeygenCelebrityBlockedError()
       }
-      const msg =
-        statusJson.data?.failure_message ??
-        statusJson.data?.failure_code ??
-        "HeyGen video generation failed"
+      const failureCode = statusJson.data?.failure_code ?? "unknown"
+      const failureMessage = statusJson.data?.failure_message ?? ""
+      // Log the real provider failure so we can diagnose at scale (user sees friendly copy).
+      console.error(
+        `[video/generate] HeyGen ${input.logRef} ${videoId}: failed code=${failureCode} message=${failureMessage}`
+      )
+      const msg = failureMessage || failureCode || "HeyGen video generation failed"
       throw new Error(msg)
     }
   }

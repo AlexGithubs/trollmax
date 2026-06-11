@@ -5,6 +5,7 @@ import { NextResponse } from "next/server"
 import { currentUser } from "@clerk/nextjs/server"
 import { nanoid } from "nanoid"
 import { getFileStore } from "@/lib/storage"
+import { downloadBlobBuffer } from "@/lib/storage/blob"
 import { userOwnsSampleUploadUrl } from "@/lib/storage/sample-upload-url"
 import { checkRateLimit } from "@/lib/rate-limit"
 import { normalizeHeadshotToJpeg } from "@/lib/media/normalize-headshot"
@@ -13,90 +14,71 @@ import { z } from "zod"
 /** Raw uploads can be larger (HEIC, PNG); output JPEG is capped inside normalize. */
 const MAX_INPUT_BYTES = 25 * 1024 * 1024
 
-const IMAGE_LIKE_EXT = new Set([
-  "jpg",
-  "jpeg",
-  "png",
-  "webp",
-  "gif",
-  "bmp",
-  "tif",
-  "tiff",
-  "heic",
-  "heif",
-  "avif",
-  "jxl",
-])
+const FinalizeBodySchema = z.object({
+  /** URL of the raw image the client uploaded directly to Blob. */
+  rawUrl: z.string().min(1),
+})
 
-function fileExt(name: string): string {
-  return name.split(".").pop()?.toLowerCase() ?? ""
-}
-
-function looksLikeImage(file: File, mime: string): boolean {
-  const m = mime.split(";")[0].trim().toLowerCase()
-  if (m.startsWith("image/")) return true
-  if (m === "application/octet-stream" || m === "" || m === "application/x-msdownload") {
-    return IMAGE_LIKE_EXT.has(fileExt(file.name ?? ""))
-  }
-  // iOS sometimes uses non-standard types for HEIC
-  if (m === "image/heic" || m === "image/heif" || m === "image/heic-sequence") return true
-  return false
-}
-
+/**
+ * Finalizes a headshot uploaded directly to Blob by the client. Downloads the raw
+ * image, normalizes it to a capped JPEG, stores the result, and deletes the raw
+ * upload. The request body carries only a URL, so large phone photos (HEIC/PNG) are
+ * no longer blocked by the ~4.5 MB serverless body limit.
+ */
 export async function POST(req: Request) {
   const user = await currentUser()
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  if (!user) {
+    return NextResponse.json(
+      { error: "Sign in to upload.", code: "UNAUTHENTICATED" },
+      { status: 401 }
+    )
+  }
 
   const { allowed } = await checkRateLimit(user.id, "upload")
   if (!allowed) {
     return NextResponse.json({ error: "Rate limit exceeded. Try again later." }, { status: 429 })
   }
 
-  const ct = req.headers.get("content-type") ?? ""
-  if (!ct.toLowerCase().includes("multipart/form-data")) {
-    return NextResponse.json(
-      { error: "Expected multipart/form-data (file upload)." },
-      { status: 415 }
-    )
+  const json = await req.json().catch(() => null)
+  const parsed = FinalizeBodySchema.safeParse(json)
+  if (!parsed.success) {
+    return NextResponse.json({ error: "Invalid request body." }, { status: 400 })
   }
 
-  let formData: FormData
+  const rawUrl = parsed.data.rawUrl
+  if (!userOwnsSampleUploadUrl(rawUrl, user.id)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  }
+
+  const fileStore = getFileStore()
+  const deleteRaw = () => fileStore.delete(rawUrl).catch(() => {})
+
+  let inputBuffer: Buffer
   try {
-    formData = await req.formData()
-  } catch {
+    const downloaded = await downloadBlobBuffer(rawUrl)
+    inputBuffer = downloaded.buffer
+  } catch (err) {
+    console.error("[headshot-upload] could not read raw upload:", err)
     return NextResponse.json(
-      { error: "Invalid or empty upload body. Try choosing the photo again." },
+      { error: "Could not read that photo. Please try again." },
       { status: 400 }
     )
   }
-  const file = formData.get("file")
-  if (!(file instanceof Blob)) {
-    return NextResponse.json({ error: "No file provided" }, { status: 400 })
-  }
 
-  if (file.size > MAX_INPUT_BYTES) {
+  if (inputBuffer.length > MAX_INPUT_BYTES) {
+    await deleteRaw()
     return NextResponse.json(
       { error: `File too large (max ~25 MB before conversion). Try a smaller image.` },
       { status: 400 }
     )
   }
 
-  const fileAsFile = file as File
-  const rawMime = file.type?.split(";")[0].trim().toLowerCase() ?? ""
-  if (!looksLikeImage(fileAsFile, rawMime)) {
-    return NextResponse.json(
-      { error: "Unsupported file type. Upload a photo (e.g. JPG, PNG, WebP, HEIC, GIF)." },
-      { status: 400 }
-    )
-  }
-
-  const inputBuffer = Buffer.from(await file.arrayBuffer())
-
   let jpegBuffer: Buffer
   try {
     jpegBuffer = await normalizeHeadshotToJpeg(inputBuffer)
   } catch (err) {
     console.error("[headshot-upload] normalize failed:", err)
+    await deleteRaw()
     const msg =
       err instanceof Error && err.message.includes("compress")
         ? err.message
@@ -104,7 +86,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: msg }, { status: 400 })
   }
 
-  const fileStore = getFileStore()
   const dest = `samples/${user.id}/${nanoid()}.jpg`
   const outMime = "image/jpeg"
 
@@ -114,8 +95,11 @@ export async function POST(req: Request) {
     url = result.url
   } catch (err) {
     console.error("[headshot-upload] fileStore.upload failed:", err)
+    await deleteRaw()
     return NextResponse.json({ error: "Storage upload failed. Please try again." }, { status: 500 })
   }
+
+  await deleteRaw()
 
   const absoluteUrl = url.startsWith("http") ? url : `${new URL(req.url).origin}${url}`
   return NextResponse.json({ url: absoluteUrl })

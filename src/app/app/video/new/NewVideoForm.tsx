@@ -25,6 +25,7 @@ import {
   Clock,
 } from "lucide-react"
 import { trimAndEncodeAudio } from "@/lib/audio/trim-and-encode"
+import { uploadRawFileToBlob } from "@/lib/client/blob-upload"
 import type {
   VoicePresetPublic,
   VoicePresetCategory,
@@ -287,7 +288,7 @@ export function NewVideoForm({ categories, presets }: Props) {
   useTrackFormStarted("video")
   const router = useRouter()
   const searchParams = useSearchParams()
-  const { isSignedIn } = useUser()
+  const { isSignedIn, user } = useUser()
   const { openSignIn } = useClerk()
 
   const [stage, setStage] = useState<Stage>("form")
@@ -631,6 +632,10 @@ export function NewVideoForm({ categories, presets }: Props) {
       : Boolean(voiceSampleUrl)
 
   async function processVoiceFile(file: File) {
+    if (isSignedIn === false || !user?.id) {
+      openSignIn()
+      return
+    }
     const prevUrl = voiceSampleUrl
     setVoiceUploadError("")
     setVoiceUploadStage("processing")
@@ -649,11 +654,14 @@ export function NewVideoForm({ categories, presets }: Props) {
     }
 
     setVoiceUploadStage("uploading")
-    const fd = new FormData()
-    fd.append("file", processedFile)
 
     try {
-      const res = await fetch("/api/upload", { method: "POST", body: fd })
+      const rawUrl = await uploadRawFileToBlob(processedFile, "voice", { userId: user.id })
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rawUrl }),
+      })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? "Upload failed")
       setVoiceSampleUrl(data.url)
@@ -748,14 +756,20 @@ export function NewVideoForm({ categories, presets }: Props) {
     file: File,
     meta?: { displayName?: string; presetId?: string | null }
   ) {
+    if (isSignedIn === false || !user?.id) {
+      openSignIn()
+      return
+    }
     setError("")
     setHeadshotUploading(true)
 
     const previousUrl = headshotImageUrl
     let blobUrlForRevoke: string | null = null
-    let earlyUploadUrl: string | null = null
 
     try {
+      // Try to decode + recompress in the browser. Succeeds for common formats
+      // (JPEG/PNG/WebP, and HEIC on Safari); falls back to the original file on
+      // browsers that can't decode it (the server normalizes either way).
       let jpegFile: File | null = null
       try {
         jpegFile = await compressHeadshotToJpegInBrowser(file)
@@ -763,18 +777,15 @@ export function NewVideoForm({ categories, presets }: Props) {
         jpegFile = null
       }
 
-      setHeadshotBusyLabel("Checking photo…")
-
-      let imgForValidation: HTMLImageElement
-
+      // Quick client-side shape/size check when we have a browser-decodable image.
       if (jpegFile) {
-        const url = URL.createObjectURL(jpegFile)
-        blobUrlForRevoke = url
+        setHeadshotBusyLabel("Checking photo…")
+        const checkUrl = URL.createObjectURL(jpegFile)
+        blobUrlForRevoke = checkUrl
+        let imgForValidation: HTMLImageElement
         try {
-          imgForValidation = await loadImageElement(url)
+          imgForValidation = await loadImageElement(checkUrl)
         } catch (err) {
-          URL.revokeObjectURL(url)
-          blobUrlForRevoke = null
           setError(
             err instanceof Error
               ? err.message
@@ -783,82 +794,40 @@ export function NewVideoForm({ categories, presets }: Props) {
           if (headshotInputRef.current) headshotInputRef.current.value = ""
           return
         }
-      } else {
-        setHeadshotBusyLabel("Preparing photo…")
-        const fdEarly = new FormData()
-        fdEarly.append("file", file)
-        const earlyRes = await fetch("/api/headshot-upload", {
-          method: "POST",
-          body: fdEarly,
-        })
-        const earlyData = (await earlyRes.json()) as { error?: string; url?: string }
-        if (!earlyRes.ok) {
-          setError(earlyData.error ?? "Could not process that photo.")
-          if (headshotInputRef.current) headshotInputRef.current.value = ""
-          return
-        }
-        earlyUploadUrl = earlyData.url ?? ""
-        const fetched = await fetch(earlyUploadUrl, { mode: "cors" })
-        if (!fetched.ok) {
-          await deleteHeadshotOnServer(earlyUploadUrl).catch(() => {})
-          setError("Could not load the converted photo for a quick face check. Try again.")
-          if (headshotInputRef.current) headshotInputRef.current.value = ""
-          return
-        }
-        const normBlob = await fetched.blob()
-        const vUrl = URL.createObjectURL(normBlob)
-        blobUrlForRevoke = vUrl
-        try {
-          imgForValidation = await loadImageElement(vUrl)
-        } catch (err) {
-          URL.revokeObjectURL(vUrl)
-          blobUrlForRevoke = null
-          await deleteHeadshotOnServer(earlyUploadUrl).catch(() => {})
-          setError(
-            err instanceof Error
-              ? err.message
-              : "Could not check this photo. Try another image."
-          )
+        const faceCheck = await validateHeadshotFace(imgForValidation)
+        if (!faceCheck.ok) {
+          setError(faceCheck.message)
           if (headshotInputRef.current) headshotInputRef.current.value = ""
           return
         }
       }
 
-      const faceCheck = await validateHeadshotFace(imgForValidation)
-      if (!faceCheck.ok) {
-        setError(faceCheck.message)
-        if (blobUrlForRevoke) {
-          URL.revokeObjectURL(blobUrlForRevoke)
-          blobUrlForRevoke = null
-        }
-        if (earlyUploadUrl) await deleteHeadshotOnServer(earlyUploadUrl).catch(() => {})
+      // Upload the raw file straight to Blob (no serverless body-size limit), then
+      // finalize server-side into a normalized, byte-capped JPEG.
+      setHeadshotBusyLabel("Uploading…")
+      const fileToUpload = jpegFile ?? file
+      const rawUrl = await uploadRawFileToBlob(fileToUpload, "headshot", { userId: user.id })
+
+      setHeadshotBusyLabel("Preparing photo…")
+      const res = await fetch("/api/headshot-upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rawUrl }),
+      })
+      const data = (await res.json()) as { error?: string; url?: string }
+      if (!res.ok || !data.url) {
+        setError(data.error ?? "Upload failed")
+        setHeadshotImageUrl("")
+        setHeadshotName("")
+        setHeadshotPreviewUrl("")
         if (headshotInputRef.current) headshotInputRef.current.value = ""
         return
       }
+      const finalUrl = data.url
 
       if (blobUrlForRevoke) {
         URL.revokeObjectURL(blobUrlForRevoke)
         blobUrlForRevoke = null
-      }
-
-      let finalUrl: string
-      if (earlyUploadUrl) {
-        finalUrl = earlyUploadUrl
-      } else {
-        setHeadshotBusyLabel("Uploading…")
-        const fd = new FormData()
-        fd.append("file", jpegFile!)
-        const res = await fetch("/api/headshot-upload", { method: "POST", body: fd })
-        const data = (await res.json()) as { error?: string; url?: string }
-        if (!res.ok) {
-          setError(data.error ?? "Upload failed")
-          setHeadshotImageUrl("")
-          setHeadshotName("")
-          setHeadshotPreviewUrl("")
-          if (headshotInputRef.current) headshotInputRef.current.value = ""
-          return
-        }
-        finalUrl = data.url ?? ""
       }
 
       setHeadshotImageUrl(finalUrl)
@@ -880,6 +849,8 @@ export function NewVideoForm({ categories, presets }: Props) {
           headshotBlobRef.current = blobUrl
           return blobUrl
         }
+        // Private blobs can't be shown via <img>; only set a displayable preview.
+        if (isPrivateVercelBlobUrlClient(finalUrl)) return ""
         return finalUrl
       })
 
@@ -1267,16 +1238,6 @@ export function NewVideoForm({ categories, presets }: Props) {
               Your video is being created. This usually takes a few minutes.
             </p>
           </div>
-          {progressId ? (
-            <GenerationCloseHint
-              product="video"
-              manifestId={progressId}
-              onLeave={() => {
-                clearActiveGeneratingVideoId()
-                router.push(`/app/video/${progressId}`)
-              }}
-            />
-          ) : null}
           <VideoGeneratingCard
             progressStep={progressStep}
             progressPct={progressPct}
@@ -1284,17 +1245,15 @@ export function NewVideoForm({ categories, presets }: Props) {
             lastError={error || null}
             errorKind={generationErrorKind}
           />
-          {error && (
-            <p
-              className={
-                generationErrorKind === "capability_unavailable"
-                  ? "rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-left text-sm text-amber-800 dark:text-amber-300 sm:text-center"
-                  : "rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-left text-sm text-destructive sm:text-center"
-              }
-            >
-              {error}
-            </p>
-          )}
+          {progressId ? (
+            <GenerationCloseHint
+              product="video"
+              onLeave={() => {
+                clearActiveGeneratingVideoId()
+                router.push(`/app/video/${progressId}`)
+              }}
+            />
+          ) : null}
         </div>
       </div>
     )
@@ -1471,11 +1430,17 @@ export function NewVideoForm({ categories, presets }: Props) {
 
             {headshotImageUrl ? (
               <div className="flex items-center gap-3 rounded-xl border border-border/50 bg-secondary/20 p-3">
-                <img
-                  src={headshotDisplayUrl}
-                  alt=""
-                  className="h-20 w-20 shrink-0 rounded-lg border border-border/40 bg-secondary/30 object-cover object-[center_22%]"
-                />
+                {headshotDisplayUrl ? (
+                  <img
+                    src={headshotDisplayUrl}
+                    alt=""
+                    className="h-20 w-20 shrink-0 rounded-lg border border-border/40 bg-secondary/30 object-cover object-[center_22%]"
+                  />
+                ) : (
+                  <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-lg border border-border/40 bg-secondary/30 text-muted-foreground">
+                    <ImageIcon className="h-7 w-7" />
+                  </div>
+                )}
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium" title={headshotName}>
                     {headshotName || "Headshot"}
