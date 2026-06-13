@@ -363,14 +363,6 @@ export async function POST(
       }
     }
 
-    // Headshot was only needed for talking-head providers. Delete it immediately — it is no longer
-    // referenced by the composed video and should not remain permanently public.
-    if (manifest.headshotImageUrl) {
-      await getFileStore().delete(manifest.headshotImageUrl).catch((err) => {
-        console.warn("[video/generate] headshot blob cleanup failed:", err)
-      })
-    }
-
     // ── Step 5: Compose final video (layout + captions) ────────────────────────
     await updateProgress({ progressStep: "Compositing + captions (FFmpeg)…", progressPct: 80, progressDetail: null as unknown as undefined })
     const composer = getVideoComposer()
@@ -437,19 +429,25 @@ export async function POST(
       updatedAt: new Date().toISOString(),
     }
     await store.set(`video:${id}`, JSON.stringify(completed))
+
+    // The headshot was only needed by the talking-head providers and is not referenced
+    // by the composed video. Delete it only now that the whole pipeline has succeeded —
+    // keeping it until success means a failed run can be retried without re-uploading.
+    if (manifest.headshotImageUrl) {
+      await getFileStore().delete(manifest.headshotImageUrl).catch((err) => {
+        console.warn("[video/generate] headshot blob cleanup failed:", err)
+      })
+    }
     console.timeEnd(`[video/generate] pipeline:${id}`)
   } catch (err) {
     // Refund credits so users are not charged for pipeline failures (D-ID timeout, Modal crash, etc.)
     await creditBananaCredits(user.id, generationCost).catch((refundErr) => {
       console.error("[video/generate] credit refund failed:", refundErr)
     })
-    // Best-effort headshot cleanup on failure (may already be deleted if D-ID succeeded before compose failed)
-    if (manifest.headshotImageUrl) {
-      await getFileStore().delete(manifest.headshotImageUrl).catch(() => {})
-    }
+    // Keep the headshot (do NOT delete or clear it) so the user can retry this manifest
+    // without re-uploading. It is cleaned up on eventual success, or when the video is deleted.
     const failed: VideoManifest = {
       ...manifest,
-      headshotImageUrl: "",
       status: "failed",
       progressStep: "Failed",
       progressPct: 100,
