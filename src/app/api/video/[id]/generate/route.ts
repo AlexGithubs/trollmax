@@ -108,46 +108,90 @@ async function runTalkingHeadProvider(
   }
 }
 
+/** Total attempts for the primary provider before giving up (1 retry for transient failures). */
+const PRIMARY_MAX_ATTEMPTS = 2
+
+/** Celebrity blocks and user-input problems are never worth retrying — they'll fail identically. */
+function isNonRetryableTalkingHeadError(err: unknown): boolean {
+  return (
+    isHeygenCelebrityBlockedError(err) ||
+    isDidCelebrityBlockedError(err) ||
+    isGenerationUserInputError(err)
+  )
+}
+
+/** A timeout already consumed most of the time budget; a retry won't fit in maxDuration. */
+function isTalkingHeadTimeout(err: unknown): boolean {
+  return err instanceof Error && /timed out/i.test(err.message)
+}
+
 /**
- * Run the primary talking-head provider; on a recoverable failure, fall back to the
- * other provider once (when it is configured). Celebrity blocks and user-input errors
- * are never retried. Provider failures are reported to Sentry so they can be diagnosed
- * even though the user only sees friendly copy.
+ * D-ID is intentionally NOT used automatically. Its output quality is noticeably worse,
+ * so we prefer to fail (and let the user retry HeyGen) rather than silently ship a D-ID
+ * render. The integration stays in the codebase as an emergency backup that an operator
+ * can re-enable by setting TALKING_HEAD_DID_FALLBACK=true.
+ */
+function isDidFallbackEnabled(): boolean {
+  return process.env.TALKING_HEAD_DID_FALLBACK?.trim().toLowerCase() === "true"
+}
+
+/**
+ * Run the primary talking-head provider (HeyGen by default), retrying once on transient
+ * failures. The D-ID fallback is opt-in only (TALKING_HEAD_DID_FALLBACK=true); by default
+ * an exhausted HeyGen run fails so the user can retry rather than receiving a D-ID video.
+ * Provider failures are reported to Sentry with the real error for diagnosis.
  */
 async function runTalkingHeadWithFallback(
   input: TalkingHeadInput,
   updateProgress: (patch: Partial<VideoManifest>) => Promise<void>
 ): Promise<string> {
   const primary = getTalkingHeadProvider()
-  const secondary: "heygen" | "did" = primary === "heygen" ? "did" : "heygen"
+  const maxAttempts = primary === "heygen" ? PRIMARY_MAX_ATTEMPTS : 1
+  let lastErr: unknown
 
-  try {
-    return await runTalkingHeadProvider(primary, input, updateProgress)
-  } catch (primaryErr) {
-    const nonRetryable =
-      isHeygenCelebrityBlockedError(primaryErr) ||
-      isDidCelebrityBlockedError(primaryErr) ||
-      isGenerationUserInputError(primaryErr)
-    if (nonRetryable || !isTalkingHeadProviderConfigured(secondary)) {
-      throw primaryErr
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await runTalkingHeadProvider(primary, input, updateProgress)
+    } catch (err) {
+      lastErr = err
+      if (isNonRetryableTalkingHeadError(err)) throw err
+      const canRetry = attempt < maxAttempts && !isTalkingHeadTimeout(err)
+      console.error(
+        `[video/generate] ${primary} talking-head attempt ${attempt}/${maxAttempts} failed for ${input.logRef}${canRetry ? " — retrying" : ""}:`,
+        err
+      )
+      Sentry.captureException(err, {
+        tags: { stage: "talking-head", provider: primary, attempt: String(attempt) },
+        extra: { logRef: input.logRef },
+      })
+      if (!canRetry) break
+      await updateProgress({
+        progressStep: "Hit a snag — retrying talking head…",
+        progressDetail: `${primary} · retry ${attempt + 1}`,
+      })
     }
+  }
 
+  // Optional emergency backup (disabled by default; see isDidFallbackEnabled).
+  const secondary: "heygen" | "did" = primary === "heygen" ? "did" : "heygen"
+  const backupAllowed = secondary === "did" ? isDidFallbackEnabled() : true
+  if (backupAllowed && isTalkingHeadProviderConfigured(secondary)) {
     console.error(
-      `[video/generate] ${primary} talking-head failed for ${input.logRef}; falling back to ${secondary}:`,
-      primaryErr
+      `[video/generate] ${primary} exhausted for ${input.logRef}; falling back to ${secondary}:`,
+      lastErr
     )
-    Sentry.captureException(primaryErr, {
+    Sentry.captureException(lastErr, {
       tags: { stage: "talking-head", provider: primary, fallback: secondary },
       extra: { logRef: input.logRef },
     })
-
     await updateProgress({
       progressStep: "Retrying talking head with a backup renderer…",
       progressDetail: `${secondary} · retry`,
     })
-
     return await runTalkingHeadProvider(secondary, input, updateProgress)
   }
+
+  throw lastErr
 }
 
 /** Friendly, provider-agnostic copy for a talking-head failure that exhausted fallbacks. */
@@ -351,8 +395,11 @@ export async function POST(
           tags: { stage: "talking-head", outcome: "exhausted" },
           extra: { logRef: id },
         })
-        // Provider-agnostic copy — a fallback provider may have produced the final error.
-        throw new GenerationUserInputError(friendlyTalkingHeadMessage(parallelErr))
+        // TEMPORARY DEBUG: append the raw provider error so the exact HeyGen failure is
+        // visible on the failed-video screen. Remove the `(debug: …)` suffix once diagnosed.
+        throw new GenerationUserInputError(
+          `${friendlyTalkingHeadMessage(parallelErr)} (debug: ${msg.slice(0, 300)})`
+        )
       } finally {
         console.timeEnd(`[video/generate] parallel:${id}`)
       }
