@@ -390,16 +390,13 @@ export async function POST(
         ) {
           throw parallelErr
         }
-        console.error(`[video/generate] parallel pipeline failed (${id}):`, parallelErr)
+        // Raw provider error → server logs + Sentry for diagnosis; users see friendly copy only.
+        console.error(`[video/generate] parallel pipeline failed (${id}): ${msg}`, parallelErr)
         Sentry.captureException(parallelErr, {
           tags: { stage: "talking-head", outcome: "exhausted" },
-          extra: { logRef: id },
+          extra: { logRef: id, rawError: msg },
         })
-        // TEMPORARY DEBUG: append the raw provider error so the exact HeyGen failure is
-        // visible on the failed-video screen. Remove the `(debug: …)` suffix once diagnosed.
-        throw new GenerationUserInputError(
-          `${friendlyTalkingHeadMessage(parallelErr)} (debug: ${msg.slice(0, 300)})`
-        )
+        throw new GenerationUserInputError(friendlyTalkingHeadMessage(parallelErr))
       } finally {
         console.timeEnd(`[video/generate] parallel:${id}`)
       }
