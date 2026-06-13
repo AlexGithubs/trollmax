@@ -31,7 +31,10 @@ function isNetworkError(err: unknown): boolean {
 }
 
 function isProcessingStatus(status: string | undefined): boolean {
-  return status === "processing" || status === "draft"
+  // NOTE: "draft" is intentionally NOT processing. The generate route flips the manifest
+  // to "processing" synchronously before returning, so a manifest still stuck on "draft"
+  // means generation never actually started (the POST failed or never reached the server).
+  return status === "processing" || status === "queued"
 }
 
 /**
@@ -104,11 +107,19 @@ export async function pollUntilGenerationSettled(options: {
   let lastStatus: GenerationPollStatus = {}
   let processingSeen = false
   let genResult: StartGenerationResult | undefined
+  let genError: Error | null = null
 
   if (options.generatePromise) {
-    void options.generatePromise.then((result) => {
-      genResult = result
-    })
+    options.generatePromise.then(
+      (result) => {
+        genResult = result
+      },
+      (err) => {
+        // A non-network generate failure (e.g. 409/500) rejects here. Capture it so we can
+        // surface it instead of polling a never-starting manifest until the timeout.
+        genError = err instanceof Error ? err : new Error(String(err))
+      }
+    )
   }
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -158,6 +169,12 @@ export async function pollUntilGenerationSettled(options: {
       }
     } catch {
       // Status poll failed transiently — keep trying unless POST also failed with no processing seen.
+    }
+
+    // If the generate POST hard-failed and the manifest never reached "processing",
+    // surface the real error promptly instead of hanging until the timeout.
+    if (genError && !processingSeen && attempt >= 5) {
+      throw genError
     }
 
     const postError = options.getPostError?.()
