@@ -66,10 +66,11 @@ export async function POST(req: Request) {
           tokenPayload: JSON.stringify({ userId: user.id, kind }),
         }
       },
-      // Processing is triggered by an explicit client finalize call so the user gets
-      // a synchronous result; this webhook is intentionally a no-op (and is not
-      // reachable on localhost anyway).
-      onUploadCompleted: async () => {},
+      // NOTE: intentionally NO onUploadCompleted. Defining it (even as a no-op) makes the
+      // SDK embed a callback URL in the client token; the Blob API then gates the upload's
+      // completion on invoking that webhook. When the callback isn't reachable (localhost,
+      // or a deployment that can't call itself), the upload hangs at 0% forever. We process
+      // the file via an explicit client finalize call instead, so no webhook is needed.
     })
     return NextResponse.json(json)
   } catch (err) {
