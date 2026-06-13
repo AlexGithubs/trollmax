@@ -28,11 +28,20 @@ export default clerkMiddleware(
           "blob:",
           "https://img.clerk.com",
           "https://*.public.blob.vercel-storage.com",
+          // Private blob store host (no ".public.") for any direct <img> previews.
+          "https://*.blob.vercel-storage.com",
         ],
         "media-src": ["'self'", "blob:", "data:", "https:", "http:"],
         "connect-src": [
           "'self'",
           "https://*.public.blob.vercel-storage.com",
+          // Client direct-to-Blob uploads PUT to the Blob API (vercel.com/api/blob),
+          // and private blobs are read back from "*.blob.vercel-storage.com". Without
+          // these, the browser refuses the upload/download connection (CSP block) and
+          // the upload appears to hang at 0%.
+          "https://vercel.com",
+          "https://blob.vercel-storage.com",
+          "https://*.blob.vercel-storage.com",
           "https://api.stripe.com",
         ],
       },
